@@ -13,85 +13,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - name: Fetch patched app.js from local patch logic via script file in repo
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          text = Path('app.js').read_text(encoding='utf-8')
-          if "sellPriceForm" in text and "سعر الشراء (التكلفة)" in text:
-              print('already applied')
-              raise SystemExit(0)
-          start = text.index('function pageInventory() {')
-          end = text.index('function pageDashboard() {')
-          new_inventory = '''function pageInventory() {
-  const u = currentUser();
-  if (!u || !["staff", "admin", "manager", "owner"].includes(u.role)) return pageLogin();
-  if (u.role === "staff" && !hasAnyPermission("catalog_view", "catalog_manage")) return pageNoPermission();
-  const bikes = (get(DB.BIKES) || []).filter((b) => !b.is_demo);
-  const costMap = new Map((state.inventoryCosts || []).map((x) => [x.motorcycle_id, x]));
-  const canEditPrice = hasRole("admin", "manager", "owner") || hasPermission("catalog_manage");
-  const canSales = hasRole("admin", "manager", "owner") || hasPermission("sales_manage");
-  const rows = bikes.map((b) => {
-    const cost = costMap.get(b.id) || {};
-    const unitCost = Number(cost.unit_cost || 0);
-    const sell = Number(b.price || 0);
-    const margin = sell - unitCost;
-    const marginPct = sell > 0 ? ((margin / sell) * 100) : 0;
-    const sc = b.stock <= 0 ? "out" : b.stock <= 2 ? "low" : "available";
-    const st = b.stock <= 0 ? "نفذ" : b.stock <= 2 ? "منخفض" : "متوفر";
-    const img = (b.images && b.images[0]) || "";
-    const priceCell = canEditPrice
-      ? `<form id="sellPriceForm" class="inline-form" data-bike-id="${esc(b.id)}">\n           <input type="number" name="price" min="0" step="0.01" value="${sell}" required style="max-width:120px">\n           <button class="btn btn-outline btn-sm" type="submit">حفظ</button>\n         </form>`
-      : `<span class="text-red" style="font-weight:900">${money(sell)}</span>`;
-    return `<tr>\n      <td><img class="mini-img" src="${esc(safeImageUrl(img))}" alt="" loading="lazy"></td>\n      <td><b>${esc(b.name)}</b><br><small>${esc(b.model || "")} - ${esc(b.category || "")}</small></td>\n      <td>${unitCost ? money(unitCost) : '<span class="hint">غير مسجّل</span>'}</td>\n      <td>${priceCell}</td>\n      <td>${unitCost ? money(margin) + '<br><small>' + marginPct.toFixed(1) + '%</small>' : '—'}</td>\n      <td>${b.stock}</td>\n      <td><span class="status-pill ${sc}">${st}</span></td>\n      <td><span class="status-pill">${esc(b.status || "—")}</span></td>\n    </tr>`;
-  }).join("");
-  return `\n    <h2 class="page-title"><i class="fa-solid fa-tags"></i> الأسعار</h2>\n    <p class="page-sub">التحكم الكامل بالأسعار: عرض سعر الشراء (التكلفة) وسعر البيع مع إمكانية تعديله، وربط عروض التقسيط والكتالوج.</p>\n    <div class="stats-grid">\n      <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-motorcycle"></i></div><div class="stat-label">طرازات مسجّلة</div><div class="stat-value">${bikes.length}</div></div>\n      <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-boxes-stacked"></i></div><div class="stat-label">إجمالي المخزون</div><div class="stat-value">${bikes.reduce((s,b)=>s+Number(b.stock||0),0)}</div></div>\n      <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-coins"></i></div><div class="stat-label">قيمة البيع المتوقعة</div><div class="stat-value" style="font-size:1.05rem">${money(bikes.reduce((s,b)=>s+Number(b.price||0)*Number(b.stock||0),0))}</div></div>\n    </div>\n    <div class="panel">\n      <div class="panel-title"><i class="fa-solid fa-screwdriver-wrench"></i> أدوات الأسعار والكتالوج</div>\n      <div class="invoice-actions">\n        ${canEditPrice ? '<button class="btn btn-primary btn-sm" data-nav="manage-bikes"><i class="fa-solid fa-motorcycle"></i> المعرض / الكتالوج (إضافة وتعديل)</button>' : ''}\n        ${canSales ? '<button class="btn btn-outline btn-sm" data-nav="sales-tools"><i class="fa-solid fa-file-invoice-dollar"></i> عروض التقسيط وتعديلها</button>' : ''}\n        ${(hasRole('admin','manager','owner')||hasPermission('catalog_manage')||hasPermission('finance_manage')) ? '<button class="btn btn-outline btn-sm" data-nav="inventory-tools"><i class="fa-solid fa-warehouse"></i> تكلفة الوحدة والجرد</button>' : ''}\n        <button class="btn btn-outline btn-sm" data-nav="pos"><i class="fa-solid fa-cash-register"></i> البيع من المعرض</button>\n      </div>\n      <p class="hint mt-2">سعر الشراء = تكلفة الوحدة من المورد/الجرد. سعر البيع قابل للتعديل مباشرة من الجدول إن كانت لديك صلاحية الكتالوج. عروض التقسيط تُدار من أداة عروض التقسيط.</p>\n    </div>\n    <div class="panel printable-panel">\n      <div class="panel-title"><i class="fa-solid fa-list"></i> جدول الأسعار (${bikes.length})</div>\n      <div class="table-wrap"><table>\n        <thead><tr>\n          <th>الصورة</th><th>الصنف / الموديل</th>\n          <th>سعر الشراء</th><th>سعر البيع</th><th>هامش الربح</th>\n          <th>المخزون</th><th>التوفر</th><th>حالة العرض</th>\n        </tr></thead>\n        <tbody>\n          ${rows || '<tr><td colspan="8">لا توجد أصناف في الكتالوج</td></tr>'}\n        </tbody>\n      </table></div>\n    </div>`;
-}
-
-'''
-          text = text[:start] + new_inventory + text[end:]
-          needle = "if (route === 'manage-bikes' && state.user) Promise.all([loadMotorcycles(),loadMotorcycleUnits()]).then(render);"
-          if "route === 'inventory' && state.user" not in text:
-              text = text.replace(needle, needle + "\n  if (route === 'inventory' && state.user) Promise.all([loadMotorcycles(),loadInventoryData()]).then(render);", 1)
-          old_cost = "  if (form.id === 'inventoryCostForm') {"
-          if "form.id === 'sellPriceForm'" not in text:
-              sell = """  if (form.id === 'sellPriceForm') {
-    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية تعديل سعر البيع','error'); return; }
-    if (!supabase) { toast('الاتصال غير متاح','error'); return; }
-    const fd = new FormData(form);
-    const bikeId = form.dataset.bikeId;
-    const price = Number(fd.get('price'));
-    if (!bikeId || !(price >= 0)) { toast('أدخل سعراً صحيحاً','error'); return; }
-    const btn = form.querySelector('[type=submit]'); if (btn) btn.disabled = true;
-    const { error } = await supabase.from('motorcycles').update({ price }).eq('id', bikeId);
-    if (btn) btn.disabled = false;
-    if (error) { toast(error.message || 'تعذر حفظ سعر البيع','error'); return; }
-    await Promise.all([loadMotorcycles(), loadInventoryData()]);
-    render();
-    toast('تم تحديث سعر البيع','success');
-    return;
-  }
-"""
-              text = text.replace(old_cost, sell + old_cost, 1)
-          text = text.replace(
-              '<p class="page-sub">بيع مباشر من المعرض — لا يحتاج العميل إلى حساب دخول</p>',
-              '<p class="page-sub">نظام البيع داخل المعرض مع دعم الماسح الضوئي (شاسيه/باركود). عند إتمام البيع تُسجَّل الفاتورة وتُخرج الوحدة من العرض تلقائياً مع الإبقاء على بيانات البيع.</p>',
-              1,
-          )
-          old_mb = '<h2 class="page-title"><i class="fa-solid fa-motorcycle"></i> المعرض / الكتالوج</h2>'
-          if old_mb in text and 'مرجع الأصناف بتفاصيل كاملة' not in text:
-              text = text.replace(
-                  old_mb,
-                  old_mb + '\n    <p class="page-sub">مرجع الأصناف بتفاصيل كاملة (موديل، فئة، وصف، صور). أضف صنفاً أو وحدة برقم شاسيه/باركود؛ استخدم حالة العرض للنشر في المتجر أو الإبقاء كمسودة. عند البيع تُخرج الوحدة من العرض تلقائياً مع الإبقاء على الفاتورة وبيانات البيع.</p>',
-                  1,
-              )
-          Path('app.js').write_text(text, encoding='utf-8')
-          print('patched', Path('app.js').stat().st_size)
-          PY
-      - name: Commit and push
+          python-version: "3.12"
+      - name: Apply patch
+        run: python3 scripts/apply-prices-tools.py
+      - name: Commit
         run: |
           git config user.name "khayal-1"
           git config user.email "motorselkhayal@gmail.com"
           git add app.js
-          if git diff --cached --quiet; then echo "No changes"; else git commit -m "ui: implement prices tools from operations board left panel" && git push; fi
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "ui: implement prices tools from operations board left panel"
+            git push
+          fi
