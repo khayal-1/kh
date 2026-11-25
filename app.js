@@ -127,14 +127,14 @@ const state = {
 
 const STAFF_PERMISSION_OPTIONS = [
   { key: 'catalog_view', label: 'عرض الكتالوج والمخزون', description: 'رؤية بيانات الدراجات غير المنشورة أيضًا.' },
-  { key: 'catalog_manage', label: 'إدارة الدراجات والصور', description: 'إضافة وتعديل الدراجات ورفع الصور؛ يشمل العرض.' },
+  { key: 'catalog_manage', label: 'المعرض / الكتالوج والصور', description: 'إضافة وتعديل الدراجات ورفع الصور؛ يشمل العرض.' },
   { key: 'requests_view', label: 'عرض طلبات العملاء', description: 'رؤية الطلبات وتفاصيلها التي أرسلها العميل.' },
   { key: 'requests_manage', label: 'تحديث حالة الطلبات', description: 'عرض الطلبات وتغيير حالتها؛ لا يسمح بالحذف.' },
   { key: 'customer_data_view', label: 'رؤية أسماء وهواتف العملاء', description: 'لعملاء الطلبات التي يحق للموظف عرضها.' },
   { key: 'sales_manage', label: 'إدارة المبيعات ونقاط البيع', description: 'تنفيذ المبيعات ومتابعة الفواتير والعمليات المسموح بها.' },
   { key: 'expenses_manage', label: 'إدارة المصروفات', description: 'تسجيل المصروفات وسدادها ومراجعة سجلها.' },
   { key: 'accounting_view', label: 'عرض الحسابات والتقارير المالية', description: 'عرض دليل الحسابات والقيود والأرصدة المالية.' },
-  { key: 'finance_manage', label: 'إدارة الأدوات المالية المتقدمة', description: 'الفترات والأرصدة الافتتاحية والأصول والسلف والتسويات والشيكات والقيود المتكررة.' },
+  { key: 'finance_manage', label: 'إدارة النظام المحاسبي', description: 'الفترات والأرصدة الافتتاحية والأصول والسلف والتسويات والشيكات والقيود المتكررة.' },
 ];
 const PERMISSION_LABELS = Object.fromEntries(STAFF_PERMISSION_OPTIONS.map((item) => [item.key, item.label]));
 
@@ -299,45 +299,73 @@ function sidebarItems() {
     ];
   }
 
-  if (u.role === 'staff') {
-    const items = [{ section: 'الموظف' }];
-    if (hasAnyPermission('catalog_view', 'catalog_manage')) items.push({ route: 'inventory', label: 'المخزن والأسعار', icon: 'fa-boxes-stacked' });
-    if (hasPermission('catalog_manage')) items.push({ route: 'manage-bikes', label: 'إدارة الدراجات', icon: 'fa-motorcycle' });
-    if (hasRequestAccess()) items.push({ route: 'staff-orders', label: 'طلبات العملاء', icon: 'fa-clipboard-list', badge: pendingTotal || null });
-    if (hasPermission('sales_manage')) items.push({ route: 'vin-scanner', label: 'ماسح الشاسيه والموتور', icon: 'fa-barcode' });
-    if (hasPermission('expenses_manage') || hasPermission('accounting_view')) items.push({ route: 'expenses', label: 'المصروفات والحسابات', icon: 'fa-money-bill-transfer' });
-    if (hasPermission('finance_manage') || hasPermission('accounting_view')) items.push({ route: 'finance-tools', label: 'الأدوات المالية المتقدمة', icon: 'fa-building-columns' });
-    if (hasPermission('finance_manage')) items.push({ route: 'hr', label: 'الموارد البشرية والرواتب', icon: 'fa-users-gear' });
-    if (hasPermission('catalog_manage') || hasPermission('finance_manage')) items.push({ route: 'inventory-tools', label: 'الجرد والضمان والصيانة', icon: 'fa-warehouse' });
-    if (hasPermission('customer_data_view') || hasPermission('customer_data_manage')) items.push({ route: 'customer-relations', label: 'إدارة العملاء والعلاقات', icon: 'fa-address-book' });
-    if (hasPermission('sales_manage')) items.push({ route: 'sales-tools', label: 'عروض الأسعار والتقسيط', icon: 'fa-file-invoice-dollar' });
-    items.push({ section: 'المتجر' }, { route: 'home', label: 'عرض المتجر', icon: 'fa-store' });
-    return items;
+  /* Staff / Manager / Admin — menu matches operations board layout */
+  const isStaff = u.role === 'staff';
+  const isAdminLike = u.role === 'admin' || u.systemRole === 'owner' || u.systemRole === 'manager';
+  const items = [];
+
+  items.push({ section: 'الحساب وإدارته' });
+  items.push({ route: 'account', label: 'الحساب وإدارته', icon: 'fa-id-card' });
+  if (isAdminLike) items.push({ route: 'dashboard', label: 'لوحة الإحصائيات', icon: 'fa-chart-line' });
+
+  if (isAdminLike || hasPermission('sales_manage')) {
+    items.push({ section: 'نظام البيع داخل المعرض' });
+    items.push({ route: 'pos', label: 'نظام البيع داخل المعرض', icon: 'fa-cash-register' });
+    items.push({ route: 'vin-scanner', label: 'الماسح الضوئي (شاسيه/باركود)', icon: 'fa-barcode' });
+    if (isAdminLike) items.push({ route: 'suppliers', label: 'الموردون والتوريد', icon: 'fa-truck-ramp-box' });
   }
 
-  /* Admin */
-  const items = [
-    { section: 'الإدارة' },
-    { route: 'dashboard', label: 'لوحة الإحصائيات', icon: 'fa-chart-line' },
-    { section: 'البيع' },
-    { route: 'pos', label: 'نقطة البيع POS', icon: 'fa-cash-register' },
-    { route: 'vin-scanner', label: 'ماسح الشاسيه والموتور', icon: 'fa-barcode' },
-    { route: 'suppliers', label: 'الموردون والتوريد', icon: 'fa-truck-ramp-box' },
-    { route: 'inventory', label: 'المخزن والأسعار', icon: 'fa-boxes-stacked' },
-    { section: 'الإدارة' },
-    { route: 'manage-bikes', label: 'إدارة الدراجات', icon: 'fa-motorcycle' },
-    { route: 'staff', label: 'الموظفين والأداء', icon: 'fa-users-gear' },
-    { route: 'expenses', label: 'المصروفات والحسابات', icon: 'fa-money-bill-transfer' },
-    { route: 'finance-tools', label: 'الأدوات المالية المتقدمة', icon: 'fa-building-columns' },
-    { route: 'hr', label: 'الموارد البشرية والرواتب', icon: 'fa-users-gear' },
-    { route: 'inventory-tools', label: 'الجرد والضمان والصيانة', icon: 'fa-warehouse' },
-    { route: 'customer-relations', label: 'إدارة العملاء والعلاقات', icon: 'fa-address-book' },
-    { route: 'sales-tools', label: 'عروض الأسعار والتقسيط', icon: 'fa-file-invoice-dollar' },
-    { route: 'staff-orders', label: 'طلبات العملاء', icon: 'fa-clipboard-list', badge: pendingTotal || null },
-    { section: 'المتجر' },
-    { route: 'home', label: 'عرض المتجر', icon: 'fa-store' }
-  ];
-  if (u.systemRole === 'owner') items.push({ section: 'صلاحيات المالك' }, { route: 'owner-data', label: 'النسخ الاحتياطي وإعادة الضبط', icon: 'fa-shield-halved' });
+  if (isAdminLike || hasAnyPermission('catalog_view', 'catalog_manage', 'sales_manage')) {
+    items.push({ section: 'الأسعار والكتالوج' });
+    if (isAdminLike || hasAnyPermission('catalog_view', 'catalog_manage')) {
+      items.push({ route: 'inventory', label: 'الأسعار', icon: 'fa-tags' });
+    }
+    if (isAdminLike || hasPermission('sales_manage')) {
+      items.push({ route: 'sales-tools', label: 'عروض التقسيط والأسعار', icon: 'fa-file-invoice-dollar' });
+    }
+    if (isAdminLike || hasPermission('catalog_manage')) {
+      items.push({ route: 'manage-bikes', label: 'المعرض / الكتالوج', icon: 'fa-motorcycle' });
+    }
+  }
+
+  if (isAdminLike || hasPermission('expenses_manage') || hasPermission('accounting_view') || hasPermission('finance_manage')) {
+    items.push({ section: 'المالية والمحاسبة' });
+    if (isAdminLike || hasPermission('expenses_manage') || hasPermission('accounting_view')) {
+      items.push({ route: 'expenses', label: 'النظام المالي', icon: 'fa-wallet' });
+    }
+    if (isAdminLike || hasPermission('finance_manage') || hasPermission('accounting_view')) {
+      items.push({ route: 'finance-tools', label: 'النظام المحاسبي', icon: 'fa-building-columns' });
+    }
+  }
+
+  if (isAdminLike || hasPermission('finance_manage')) {
+    items.push({ section: 'الموارد البشرية' });
+    if (isAdminLike) items.push({ route: 'staff', label: 'التعيين وحسابات الموظفين', icon: 'fa-user-plus' });
+    if (isAdminLike || hasPermission('finance_manage')) items.push({ route: 'hr', label: 'الموارد البشرية والمرتبات', icon: 'fa-users-gear' });
+  }
+
+  if (isAdminLike || hasPermission('catalog_manage') || hasPermission('finance_manage')) {
+    items.push({ section: 'المخزن والتشغيل' });
+    items.push({ route: 'inventory-tools', label: 'الجرد والضمان والصيانة', icon: 'fa-warehouse' });
+  }
+
+  if (isAdminLike || hasPermission('customer_data_view') || hasPermission('customer_data_manage') || hasRequestAccess()) {
+    items.push({ section: 'العملاء' });
+    if (isAdminLike || hasPermission('customer_data_view') || hasPermission('customer_data_manage')) {
+      items.push({ route: 'customer-relations', label: 'إدارة العملاء والعلاقات', icon: 'fa-address-book' });
+    }
+    if (isAdminLike || hasRequestAccess()) {
+      items.push({ route: 'staff-orders', label: 'طلبات العملاء', icon: 'fa-clipboard-list', badge: pendingTotal || null });
+    }
+  }
+
+  items.push({ section: 'المتجر' });
+  items.push({ route: 'home', label: 'عرض المتجر', icon: 'fa-store' });
+
+  if (u.systemRole === 'owner') {
+    items.push({ section: 'صلاحيات المالك' });
+    items.push({ route: 'owner-data', label: 'النسخ الاحتياطي وإعادة الضبط', icon: 'fa-shield-halved' });
+  }
   return items;
 }
 
@@ -374,16 +402,19 @@ function renderAccountArea() {
       </button>`;
     return;
   }
-  const roleLabel = u.systemRole === 'manager' ? 'مدير مساعد' : u.role === 'admin' ? 'مدير' : u.role === 'staff' ? 'موظف' : 'عميل';
+  const roleLabel = u.systemRole === 'owner' ? 'المالك' : u.systemRole === 'manager' ? 'مدير مساعد' : u.role === 'admin' ? 'مدير' : u.role === 'staff' ? 'موظف' : 'عميل';
+  const fullName = u.name || u.email || 'مستخدم';
+  const initial = (fullName || '?').trim().charAt(0);
+  const isOps = u.role === 'staff' || u.role === 'admin' || u.systemRole === 'owner' || u.systemRole === 'manager';
   area.innerHTML = `
-    <div class="user-chip">
-      <div class="avatar">${esc((u.name || '?').charAt(0))}</div>
-      <span class="name">${esc((u.name || '').split(' ')[0])}</span>
-      <span class="role-badge">${roleLabel}</span>
-    </div>
-    <button class="btn btn-ghost-light btn-sm" data-nav="account">
-      <i class="fa-solid fa-user"></i> حسابي
+    <button class="user-chip" data-nav="account" title="الحساب وإدارته" type="button">
+      <div class="avatar" aria-hidden="true">${esc(initial)}</div>
+      <span class="user-chip-meta">
+        <span class="name">${esc(fullName)}</span>
+        <span class="role-badge">${esc(roleLabel)}</span>
+      </span>
     </button>
+    ${isOps ? '' : '<button class="btn btn-ghost-light btn-sm" data-nav="account"><i class="fa-solid fa-user"></i> حسابي</button>'}
     <button class="btn btn-primary btn-sm" id="logoutBtn" title="تسجيل الخروج">
       <i class="fa-solid fa-right-from-bracket"></i>
     </button>`;
@@ -914,7 +945,7 @@ function pagePOS() {
   const available = state.bikes.filter(bike => bike.status === 'available' && availableUnits.some(unit => unit.motorcycle_id === bike.id));
   const sales = state.sales || [];
   return `
-    <h2 class="page-title"><i class="fa-solid fa-cash-register"></i> نقطة البيع POS</h2>
+    <h2 class="page-title"><i class="fa-solid fa-cash-register"></i> نظام البيع داخل المعرض</h2>
     <p class="page-sub">بيع مباشر من المعرض — لا يحتاج العميل إلى حساب دخول</p>
     <div class="panel">
       <div class="panel-title"><i class="fa-solid fa-cart-plus"></i> فاتورة بيع جديدة</div>
@@ -1042,7 +1073,7 @@ function pageInventoryTools() {
  '<div class="stats-grid"><div class="stat-card"><div class="stat-label">طرازات المخزون</div><div class="stat-value">'+bikes.length+'</div></div><div class="stat-card"><div class="stat-label">أرقام هياكل فعلية</div><div class="stat-value">'+realUnits.length+'</div></div><div class="stat-card"><div class="stat-label">وحدات ببيانات تجريبية أو تابعة لطراز تجريبي</div><div class="stat-value">'+((state.motorcycleUnits||[]).length-realUnits.length)+'</div></div><div class="stat-card"><div class="stat-label">تنبيهات إعادة الطلب</div><div class="stat-value">'+(state.reorderAlerts||[]).length+'</div></div><div class="stat-card"><div class="stat-label">أوامر صيانة مفتوحة</div><div class="stat-value">'+(state.serviceOrders||[]).filter(x=>!['completed','cancelled'].includes(x.status)).length+'</div></div></div>'+
  '<div class="panel printable-panel"><div class="panel-title">مطابقة رصيد الطراز مع الوحدات الفعلية</div><p class="hint">يجب أن يساوي رصيد الطراز عدد الوحدات المتاحة والمحجوزة وتحت الصيانة. سجلات الفروق القديمة تحتاج تسجيل أرقام الشاسيه أو مراجعة حركة مخزون قبل اعتماد الجرد أو البيع.</p><div class="table-wrap"><table><thead><tr><th>الطراز</th><th>رصيد الطراز</th><th>الوحدات المسجلة</th><th>الفرق</th><th>تفصيل الحالات</th></tr></thead><tbody>'+(reconciliationRows||'<tr><td colspan="5">لا توجد فروق بين الرصيد والوحدات المسجلة</td></tr>')+'</tbody></table></div></div>'+
  '<div class="panel printable-panel"><div class="panel-title">تكلفة المخزون وحد إعادة الطلب</div><p class="hint">يُحدّث النظام متوسط تكلفة الوحدة المرجح تلقائيًا من استلامات الشراء بعد خصم مرتجعات المورد. يمكن للمحاسب تعديل التكلفة يدويًا عند وجود تسوية موثقة.</p><div class="table-wrap"><table><thead><tr><th>الدراجة</th><th>المخزون</th><th>متوسط التكلفة المرجح</th><th>حد الطلب</th><th>تحديث التكلفة / الحد</th></tr></thead><tbody>'+(costRows||'<tr><td colspan="5">لا توجد دراجات</td></tr>')+'</tbody></table></div></div>'+
- '<div class="panel"><div class="panel-title">إدارة وحدات الدراجات</div><p>أرقام الشاسيه والموتور وتفاصيل كل دراجة أصبحت داخل إدارة الدراجات. افتح مجلد النوع لإضافة الوحدات أو تعديل بياناتها وحالاتها.</p><button class="btn btn-outline" data-nav="manage-bikes">فتح إدارة الدراجات</button></div>'+
+ '<div class="panel"><div class="panel-title">إدارة وحدات الدراجات</div><p>أرقام الشاسيه والموتور وتفاصيل كل دراجة أصبحت داخل المعرض / الكتالوج. افتح مجلد النوع لإضافة الوحدات أو تعديل بياناتها وحالاتها.</p><button class="btn btn-outline" data-nav="manage-bikes">فتح المعرض / الكتالوج</button></div>'+
  '<div class="panel printable-panel"><div class="panel-title">الجرد الفعلي وتسوية فروق المخزون</div><p class="hint">أدخل العدد المعدود لكل طراز. تُسجل فروق الكمية في حركات المخزون، وتُرحّل القيمة إلى حساب المخزون وفروق الجرد باستخدام تكلفة الوحدة المسجلة. لا تُنشأ قيود إذا لم يوجد فرق.</p><form id="stocktakeForm" class="form-grid"><div class="form-row"><div class="field"><label>تاريخ الجرد</label><input name="stocktake_date" type="date" required></div><div class="field"><label>ملاحظات</label><input name="notes" maxlength="180"></div></div>'+bikes.map(b=>'<div class="form-row" data-stocktake-line="'+esc(b.id)+'"><div class="field"><label>'+esc(b.name)+' — الدفتري '+b.stock+'</label><input type="number" name="counted_quantity" min="0" step="1" value="'+b.stock+'" required></div><div class="field"><label>تكلفة الوحدة</label><input disabled value="'+(costMap.get(b.id)?.unit_cost??'غير محددة')+'"></div></div>').join('')+'<button class="btn btn-primary" type="submit" '+(!bikes.length?'disabled':'')+'>ترحيل الجرد الفعلي</button></form><div class="table-wrap mt-2"><table><thead><tr><th>الجرد</th><th>التاريخ</th><th>ملاحظات</th><th>زيادة</th><th>عجز</th><th>قيد اليومية</th></tr></thead><tbody>'+(batchRows||'<tr><td colspan="6">لا توجد عمليات جرد</td></tr>')+'</tbody></table></div></div>'+
  '<div class="panel printable-panel"><div class="panel-title">تنبيهات إعادة الطلب</div><div class="table-wrap"><table><thead><tr><th>الدراجة</th><th>المخزون الحالي</th><th>حد الطلب</th><th>تكلفة الوحدة</th><th>قيمة المخزون</th></tr></thead><tbody>'+(reorderRows||'<tr><td colspan="5">لا توجد تنبيهات. عيّن حد إعادة الطلب لكل طراز.</td></tr>')+'</tbody></table></div></div>'+
  '<div class="panel"><div class="panel-title">إدارة الضمان</div><form id="warrantyForm" class="form-grid"><div class="form-row"><div class="field"><label>الدراجة</label><select name="motorcycle_id" required><option value="">اختر الدراجة</option>'+bikeOpts+'</select></div><div class="field"><label>فاتورة البيع (اختياري)</label><select name="sale_id"><option value="">بدون ربط فاتورة</option>'+saleOpts+'</select></div></div><div class="form-row"><div class="field"><label>اسم العميل</label><input name="customer_name" required maxlength="120"></div><div class="field"><label>الهاتف</label><input name="customer_phone" required maxlength="30"></div></div><div class="form-row"><div class="field"><label>بداية الضمان</label><input name="start_date" type="date" required></div><div class="field"><label>نهاية الضمان</label><input name="end_date" type="date" required></div></div><div class="field"><label>الشروط</label><textarea name="terms" rows="2"></textarea></div><button class="btn btn-outline" type="submit">تسجيل ضمان</button></form><div class="table-wrap mt-2"><table><thead><tr><th>الضمان</th><th>الدراجة</th><th>العميل</th><th>الهاتف</th><th>الفترة</th><th>الحالة</th></tr></thead><tbody>'+(warrantyRows||'<tr><td colspan="6">لا توجد ضمانات</td></tr>')+'</tbody></table></div></div>'+
@@ -1070,7 +1101,7 @@ function pageHR() {
     return '<tr><td>#'+x.payroll_number+'</td><td>'+esc(x.payroll_name)+'</td><td>'+esc(x.payroll_date)+'</td><td>'+items.length+'</td><td>'+money(x.total_net)+'</td><td>'+money(paid)+'</td><td>'+esc(x.status)+'</td><td>'+(x.status==='draft'?'<form id="postPayrollForm" class="inline-form" data-run-id="'+esc(x.id)+'"><button class="btn btn-primary btn-sm" type="submit">ترحيل الرواتب</button></form><form id="cancelPayrollForm" class="inline-form" data-run-id="'+esc(x.id)+'"><button class="btn btn-outline btn-sm" type="submit">إلغاء المسودة</button></form>':x.status==='posted'?'<form id="payrollPaymentForm" class="form-grid" data-run-id="'+esc(x.id)+'"><input type="number" name="amount" min="0.01" max="'+Math.max(0,Number(x.total_net)-paid)+'" step="0.01" placeholder="المبلغ" required><select name="cash_account_id" required><option value="">الخزينة / البنك</option>'+cashOpts+'</select><input type="date" name="payment_date" required><button class="btn btn-outline btn-sm" type="submit">صرف</button></form>':'ملغى')+'</td></tr>';
   }).join('');
   const payrollEmployees=active.map(x=>'<div class="panel panel-subtle" data-payroll-employee="'+esc(x.id)+'"><strong>'+esc(x.full_name)+' — '+esc(x.employee_code)+'</strong><input type="hidden" name="employee_id" value="'+esc(x.id)+'"><div class="form-row"><div class="field"><label>الأساسي</label><input name="base_salary" type="number" min="0" step="0.01" value="'+Number(x.base_salary||0)+'"></div><div class="field"><label>بدلات</label><input name="allowances" type="number" min="0" step="0.01" value="0"></div><div class="field"><label>تأمين الموظف</label><input name="employee_insurance" type="number" min="0" step="0.01" value="0"></div></div><div class="form-row"><div class="field"><label>ضريبة</label><input name="tax_deduction" type="number" min="0" step="0.01" value="0"></div><div class="field"><label>استقطاعات أخرى</label><input name="other_deductions" type="number" min="0" step="0.01" value="0"></div><div class="field"><label>سداد سلفة</label><input name="advance_deduction" type="number" min="0" step="0.01" value="0"></div><div class="field"><label>تأمين الشركة</label><input name="employer_insurance" type="number" min="0" step="0.01" value="0"></div></div><small class="hint">العمولات المعلقة لهذا الموظف تُضاف تلقائيًا عند إنشاء كشف الرواتب.</small></div>').join('');
-  return '<h2 class="page-title"><i class="fa-solid fa-users-gear"></i> الموارد البشرية والرواتب</h2><p class="page-sub">إدارة ملفات الموظفين والحضور والإجازات والعهد والسلف والعمولات وكشوف الرواتب. نسب التأمين والضرائب لا تُفترض؛ تُدخل قيم الاستقطاع المعتمدة يدويًا.</p>'+
+  return '<h2 class="page-title"><i class="fa-solid fa-users-gear"></i> الموارد البشرية والمرتبات</h2><p class="page-sub">إدارة ملفات الموظفين والحضور والإجازات والعهد والسلف والعمولات وكشوف الرواتب. نسب التأمين والضرائب لا تُفترض؛ تُدخل قيم الاستقطاع المعتمدة يدويًا.</p>'+
    '<div class="stats-grid"><div class="stat-card"><div class="stat-label">الموظفون النشطون</div><div class="stat-value">'+active.length+'</div></div><div class="stat-card"><div class="stat-label">طلبات إجازة معلقة</div><div class="stat-value">'+(state.employeeLeaveRequests||[]).filter(x=>x.status==='pending').length+'</div></div><div class="stat-card"><div class="stat-label">عهد لم تُرد</div><div class="stat-value">'+(state.employeeCustody||[]).filter(x=>x.status==='assigned').length+'</div></div><div class="stat-card"><div class="stat-label">سلف موظفين متبقية</div><div class="stat-value">'+money((state.employeeAdvances||[]).reduce((n,x)=>n+Number(x.amount)-Number(x.repaid_amount),0))+'</div></div></div>'+
    '<div class="panel"><div class="panel-title">ملفات الموظفين</div><form id="employeeForm" class="form-grid"><div class="form-row"><div class="field"><label>كود الموظف</label><input name="employee_code" required maxlength="30"></div><div class="field"><label>الاسم الكامل</label><input name="full_name" required maxlength="150"></div></div><div class="form-row"><div class="field"><label>الهاتف</label><input name="phone" maxlength="30"></div><div class="field"><label>البريد</label><input name="email" type="email" maxlength="150"></div></div><div class="form-row"><div class="field"><label>المسمى الوظيفي</label><input name="job_title" maxlength="100"></div><div class="field"><label>تاريخ التعيين</label><input name="hire_date" type="date" required></div><div class="field"><label>الراتب الأساسي</label><input name="base_salary" type="number" min="0" step="0.01" required></div></div><div class="field"><label>حساب دخول الموظف (اختياري)</label><select name="auth_user_id"><option value="">بدون ربط بحساب دخول</option>'+authUserOpts+'</select></div><div class="field"><label>ملاحظات</label><input name="notes" maxlength="200"></div><button class="btn btn-primary" type="submit">إضافة ملف موظف</button></form><div class="table-wrap mt-2"><table><thead><tr><th>الكود</th><th>الموظف</th><th>الوظيفة</th><th>الهاتف</th><th>الأساسي</th><th>التعيين</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>'+(employeeRows||'<tr><td colspan="8">لا توجد ملفات موظفين</td></tr>')+'</tbody></table></div></div>'+
    '<div class="panel"><div class="panel-title">الحضور والانصراف</div><form id="attendanceForm" class="form-grid"><div class="form-row"><div class="field"><label>الموظف</label><select name="employee_id" required><option value="">اختر الموظف</option>'+empOpts+'</select></div><div class="field"><label>التاريخ</label><input type="date" name="attendance_date" required></div><div class="field"><label>الحالة</label><select name="attendance_status"><option value="present">حاضر</option><option value="late">متأخر</option><option value="absent">غائب</option><option value="leave">إجازة</option><option value="holiday">عطلة</option></select></div></div><div class="form-row"><div class="field"><label>الحضور</label><input type="datetime-local" name="check_in"></div><div class="field"><label>الانصراف</label><input type="datetime-local" name="check_out"></div></div><button class="btn btn-outline" type="submit">حفظ الحضور</button></form><div class="table-wrap mt-2"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>الحالة</th><th>الحضور</th><th>الانصراف</th></tr></thead><tbody>'+(attendanceRows||'<tr><td colspan="5">لا توجد سجلات حضور</td></tr>')+'</tbody></table></div></div>'+
@@ -1144,7 +1175,7 @@ function pageFinanceTools() {
   const openRecs=(state.bankReconciliations||[]).filter(x=>x.status==='open').map(x=>'<option value="'+esc(x.id)+'">#'+x.reconciliation_number+' — '+esc(x.period_end)+'</option>').join('');
   const suppliersSummary=(state.supplierAdvances||[]).reduce((n,x)=>n+Number(x.amount)-Number(x.allocated_amount),0);
   const assetsSummary=(state.fixedAssets||[]).filter(x=>x.status==='active').reduce((n,x)=>n+Number(x.cost)-Number(x.accumulated_depreciation),0);
-  return '<h2 class="page-title"><i class="fa-solid fa-building-columns"></i> مركز الأدوات المالية المتقدمة</h2>'+
+  return '<h2 class="page-title"><i class="fa-solid fa-building-columns"></i> مركز النظام المحاسبي</h2>'+
    '<p class="page-sub">إدارة الفترات والأرصدة الافتتاحية والسلف والأصول والتسويات والشيكات والقيود المتكررة والضرائب. كل الترحيلات تنشئ قيودًا مزدوجة متوازنة وتخضع لصلاحيات قاعدة البيانات.</p>'+
    '<div class="stats-grid"><div class="stat-card"><div class="stat-label">الفترات المفتوحة</div><div class="stat-value">'+(state.fiscalPeriods||[]).filter(x=>x.status==='open').length+'</div></div><div class="stat-card"><div class="stat-label">سلف الموردين غير المسواة</div><div class="stat-value">'+money(suppliersSummary)+'</div></div><div class="stat-card"><div class="stat-label">صافي قيمة الأصول النشطة</div><div class="stat-value">'+money(assetsSummary)+'</div></div><div class="stat-card"><div class="stat-label">الشيكات المعلقة</div><div class="stat-value">'+(state.cheques||[]).filter(x=>['pending','under_collection'].includes(x.status)).length+'</div></div></div>'+
    '<div class="panel"><div class="panel-title"><i class="fa-solid fa-calendar-check"></i> الفترات المحاسبية</div>'+(canManage?'<form id="fiscalPeriodForm" class="form-grid"><div class="form-row"><div class="field"><label>كود الفترة</label><input name="period_code" required placeholder="2026-12"></div><div class="field"><label>اسم الفترة</label><input name="period_name" required placeholder="ديسمبر 2026"></div></div><div class="form-row"><div class="field"><label>من</label><input type="date" name="start_date" required></div><div class="field"><label>إلى</label><input type="date" name="end_date" required></div></div><button class="btn btn-primary" type="submit">إنشاء فترة</button></form>':'')+'<div class="table-wrap mt-2"><table><thead><tr><th>الكود</th><th>الفترة</th><th>التواريخ</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>'+(periodRows||'<tr><td colspan="5">لا توجد فترات بعد</td></tr>')+'</tbody></table></div></div>'+
@@ -1186,7 +1217,7 @@ function pageExpenses() {
   const cashRows = balances.map(row=>'<tr><td>'+esc(row.cash_account_name)+'</td><td>'+(row.account_kind==='bank'?'بنك':'نقدية')+'</td><td>'+money(row.balance)+'</td></tr>').join('');
   const trialDebit=trial.reduce((n,row)=>n+Number(row.debit_balance||0),0);
   const trialCredit=trial.reduce((n,row)=>n+Number(row.credit_balance||0),0);
-  return '<h2 class="page-title"><i class="fa-solid fa-money-bill-transfer"></i> المصروفات والحسابات</h2>' +
+  return '<h2 class="page-title"><i class="fa-solid fa-money-bill-transfer"></i> النظام المالي</h2>' +
     '<p class="page-sub">سجل المصروفات، أرصدة الخزائن والبنوك، وميزان المراجعة من القيود المرحلة.</p>' +
     '<div class="stats-grid"><div class="stat-card"><div class="stat-label">إجمالي المصروفات المعروضة</div><div class="stat-value">'+money(total)+'</div></div><div class="stat-card"><div class="stat-label">المدفوع</div><div class="stat-value">'+money(paid)+'</div></div><div class="stat-card"><div class="stat-label">المتبقي</div><div class="stat-value">'+money(total-paid)+'</div></div></div>' +
     (managerAccess ? '<div class="panel"><div class="panel-title"><i class="fa-solid fa-building-columns"></i> إضافة خزينة أو حساب بنكي</div><form id="cashAccountForm" class="form-grid"><div class="form-row"><div class="field"><label>اسم الحساب</label><input name="name" required maxlength="120" placeholder="مثال: خزينة الفرع أو البنك الأهلي"></div><div class="field"><label>نوع الحساب</label><select name="kind" required><option value="cash">خزينة نقدية</option><option value="bank">حساب بنكي</option></select></div></div><button class="btn btn-outline" type="submit"><i class="fa-solid fa-plus"></i> إضافة الحساب</button></form><p class="hint">يُنشأ الحساب برصيد صفر. أدخل الأرصدة الافتتاحية فقط بعد اعتمادها محاسبيًا.</p></div>' : '') +
@@ -1326,8 +1357,8 @@ function pageInventory() {
   const bikes = get(DB.BIKES);
   const isAdmin = u.role === 'admin';
   return `
-    <h2 class="page-title"><i class="fa-solid fa-boxes-stacked"></i> المخزن والأسعار</h2>
-    <p class="page-sub">${isAdmin ? 'لديك صلاحية كاملة للتعديل من قسم إدارة الدراجات' : 'للاطلاع والبيع فقط'}</p>
+    <h2 class="page-title"><i class="fa-solid fa-boxes-stacked"></i> الأسعار</h2>
+    <p class="page-sub">${isAdmin ? 'لديك صلاحية كاملة للتعديل من قسم المعرض / الكتالوج' : 'للاطلاع والبيع فقط'}</p>
     <div class="panel printable-panel">
       <div class="table-wrap"><table>
         <thead><tr>
@@ -1370,13 +1401,13 @@ function pageDashboard() {
   return `<h2 class="page-title"><i class="fa-solid fa-chart-line"></i> لوحة الإحصائيات</h2>
     <p class="page-sub">ملخص مباشر من بيانات المخزون والمبيعات والموردين والحسابات. أرقام المبيعات والمصروفات تخص السجلات المحملة في هذه الصفحة.</p>
     <div class="stats-grid">
-      <a class="stat-card stat-card-link" href="#manage-bikes" data-nav="manage-bikes" aria-label="فتح إدارة الدراجات"><div class="stat-icon"><i class="fa-solid fa-motorcycle"></i></div><div class="stat-label">الدراجات المسجلة</div><div class="stat-value">${bikes.length}</div><span class="stat-hint">فتح إدارة الدراجات <i class="fa-solid fa-arrow-left"></i></span></a>
+      <a class="stat-card stat-card-link" href="#manage-bikes" data-nav="manage-bikes" aria-label="فتح المعرض / الكتالوج"><div class="stat-icon"><i class="fa-solid fa-motorcycle"></i></div><div class="stat-label">الدراجات المسجلة</div><div class="stat-value">${bikes.length}</div><span class="stat-hint">فتح المعرض / الكتالوج <i class="fa-solid fa-arrow-left"></i></span></a>
       <a class="stat-card stat-card-link" href="#inventory-tools" data-nav="inventory-tools" aria-label="فتح إدارة المخزون"><div class="stat-icon"><i class="fa-solid fa-boxes-stacked"></i></div><div class="stat-label">وحدات المخزون</div><div class="stat-value">${totalStock}</div><span class="stat-hint">فتح المخزون والجرد <i class="fa-solid fa-arrow-left"></i></span></a>
       <a class="stat-card stat-card-link" href="#staff-orders" data-nav="staff-orders" aria-label="فتح طلبات العملاء"><div class="stat-icon"><i class="fa-solid fa-clipboard-list"></i></div><div class="stat-label">طلبات العملاء المفتوحة</div><div class="stat-value">${pending}</div><span class="stat-hint">فتح الطلبات <i class="fa-solid fa-arrow-left"></i></span></a>
       <a class="stat-card stat-card-link" href="#pos" data-nav="pos" aria-label="فتح فواتير المبيعات"><div class="stat-icon"><i class="fa-solid fa-file-invoice-dollar"></i></div><div class="stat-label">مبيعات آخر ${sales.length} فاتورة</div><div class="stat-value">${money(salesTotal)}</div><span class="stat-hint">فتح نقطة البيع والفواتير <i class="fa-solid fa-arrow-left"></i></span></a>
       <a class="stat-card stat-card-link" href="#sales-tools" data-nav="sales-tools" aria-label="فتح مستحقات العملاء"><div class="stat-icon"><i class="fa-solid fa-hand-holding-dollar"></i></div><div class="stat-label">مستحقات العملاء ضمن الفواتير المعروضة</div><div class="stat-value">${money(receivables)}</div><span class="stat-hint">فتح أدوات المبيعات والتحصيل <i class="fa-solid fa-arrow-left"></i></span></a>
       <a class="stat-card stat-card-link" href="#suppliers" data-nav="suppliers" aria-label="فتح مستحقات الموردين"><div class="stat-icon"><i class="fa-solid fa-truck"></i></div><div class="stat-label">مستحقات الموردين ضمن الفواتير المحملة</div><div class="stat-value">${money(supplierDue)}</div><span class="stat-hint">فتح الموردين والمشتريات <i class="fa-solid fa-arrow-left"></i></span></a>
-      <a class="stat-card stat-card-link" href="#expenses" data-nav="expenses" aria-label="فتح المصروفات"><div class="stat-icon"><i class="fa-solid fa-money-bill-transfer"></i></div><div class="stat-label">مصروفات السجلات المحملة</div><div class="stat-value">${money(expenseTotal)}</div><span class="stat-hint">فتح المصروفات والحسابات <i class="fa-solid fa-arrow-left"></i></span></a>
+      <a class="stat-card stat-card-link" href="#expenses" data-nav="expenses" aria-label="فتح المصروفات"><div class="stat-icon"><i class="fa-solid fa-money-bill-transfer"></i></div><div class="stat-label">مصروفات السجلات المحملة</div><div class="stat-value">${money(expenseTotal)}</div><span class="stat-hint">فتح النظام المالي <i class="fa-solid fa-arrow-left"></i></span></a>
       <a class="stat-card stat-card-link" href="#finance-tools" data-nav="finance-tools" aria-label="فتح الأرصدة المالية"><div class="stat-icon"><i class="fa-solid fa-vault"></i></div><div class="stat-label">أرصدة الخزائن والبنوك</div><div class="stat-value">${money(cashTotal)}</div><span class="stat-hint">فتح الأدوات المالية <i class="fa-solid fa-arrow-left"></i></span></a>
     </div>
     <div class="panel"><div class="panel-title"><i class="fa-solid fa-receipt"></i> أحدث الفواتير المحملة</div>
@@ -1455,7 +1486,7 @@ function pageManageBikes() {
       '<div class="bike-folder-actions"><button class="btn btn-outline btn-sm" data-edit-bike="'+esc(b.id)+'"><i class="fa-solid fa-pen"></i> تعديل بيانات النوع</button>'+(!b.is_demo?'<button class="btn btn-primary btn-sm" data-add-unit-for="'+esc(b.id)+'"><i class="fa-solid fa-plus"></i> تسجيل دراجة فعلية</button>':'<span class="demo-data-label">نوع تجريبي — لا يقبل مخزونًا فعليًا</span>')+''+(!b.is_demo?'<button class="btn btn-outline btn-sm" data-archive-bike="'+esc(b.id)+'" data-bike-name="'+esc(b.name)+'" '+(b.status==='unavailable'?'disabled':'')+'><i class="fa-solid fa-box-archive"></i> أرشفة وإخفاء</button>':'<button class="btn btn-danger btn-sm" data-delete-bike="'+esc(b.id)+'" data-bike-name="'+esc(b.name)+'"><i class="fa-solid fa-trash"></i> حذف النوع التجريبي</button>')+'</div>' +
       (rows || '<div class="empty">لا توجد وحدات مسجلة لهذا النوع بعد.</div>')+'</div></details>';
   }).join('');
-  return '<h2 class="page-title"><i class="fa-solid fa-motorcycle"></i> إدارة الدراجات والمخزون</h2>' +
+  return '<h2 class="page-title"><i class="fa-solid fa-motorcycle"></i> المعرض / الكتالوج والمخزون</h2>' +
     '<p class="page-sub">كل مجلد يمثل نوعاً واحداً. افتح المجلد لرؤية كل دراجة فعلية وأرقامها وحالتها وتفاصيلها.</p>' +
     '<div class="stats-grid"><div class="stat-card"><div class="stat-label">أنواع الدراجات</div><div class="stat-value">'+bikes.length+'</div></div><div class="stat-card"><div class="stat-label">إجمالي الوحدات المسجلة</div><div class="stat-value">'+totalUnits+'</div></div><div class="stat-card"><div class="stat-label">وحدات متاحة للبيع</div><div class="stat-value">'+availableUnits+'</div></div><div class="stat-card"><div class="stat-label">معروضة على المتجر</div><div class="stat-value">'+publishedUnits+'</div></div><div class="stat-card"><div class="stat-label">وحدات مباعة</div><div class="stat-value">'+soldUnits+'</div></div><div class="stat-card"><div class="stat-label">سجلات تجريبية</div><div class="stat-value">'+demoUnits+'</div></div></div>' +
     '<div class="panel"><div class="bike-folder-toolbar"><button class="btn btn-primary" id="addBikeBtn"><i class="fa-solid fa-plus"></i> إضافة نوع دراجة</button><button class="btn btn-outline" id="syncTelegramPhotosBtn"><i class="fa-solid fa-rotate"></i> مزامنة الصور</button></div><p class="hint">المخزون الفعلي هو المتجر نفسه: كل وحدة حقيقية متاحة للبيع تظهر تلقائيًا، وتختفي تلقائيًا عند بيعها أو حجزها أو تحويلها للصيانة. حذف السجل متاح فقط للوحدات غير المرتبطة بمبيعات أو مستندات مخزون.</p>' +
@@ -2312,7 +2343,7 @@ document.addEventListener('click', async (e) => {
 
   /* Manager or explicitly authorized staff — catalog */
   if (e.target.closest('#addBikeBtn')) {
-    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية إدارة الدراجات', 'error'); return; }
+    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية المعرض / الكتالوج', 'error'); return; }
     openModal(bikeFormHTML(null)); return;
   }
   const addUnitButton = e.target.closest('[data-add-unit-for]');
@@ -2370,7 +2401,7 @@ document.addEventListener('click', async (e) => {
   }
   const editBike = e.target.closest('[data-edit-bike]');
   if (editBike) {
-    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية إدارة الدراجات', 'error'); return; }
+    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية المعرض / الكتالوج', 'error'); return; }
     const bike = get(DB.BIKES).find((b) => b.id === editBike.dataset.editBike);
     if (bike) openModal(bikeFormHTML(bike));
     return;
@@ -3419,7 +3450,7 @@ document.addEventListener('submit', async (e) => {
 
   /* Motorcycle catalogue data and Telegram-backed images are stored through Supabase. */
   if (form.id === 'bikeForm') {
-    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية إدارة الدراجات', 'error'); return; }
+    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية المعرض / الكتالوج', 'error'); return; }
     const fd = new FormData(form);
     const id = form.dataset.id;
     const images = String(fd.get('images') || '').split('\n').map((s) => s.trim()).filter(Boolean);
@@ -4067,7 +4098,7 @@ const EN = {
   'حسابات الموظفين':'Staff accounts','الموظفون الحاليون':'Current staff','إنشاء حساب موظف':'Create staff account',
   'اسم الموظف':'Staff name','البريد الإلكتروني':'Email address','رقم الهاتف (اختياري)':'Phone (optional)',
   'الصلاحيات الممنوحة — لا شيء محدد افتراضيًا':'Granted permissions — none selected by default',
-  'عرض الكتالوج والمخزون':'View catalog and inventory','إدارة الدراجات والصور':'Manage motorcycles and photos',
+  'عرض الكتالوج والمخزون':'View catalog and inventory','المعرض / الكتالوج والصور':'Manage motorcycles and photos',
   'عرض طلبات العملاء':'View customer requests','تحديث حالة الطلبات':'Update request status',
   'رؤية أسماء وهواتف العملاء':'View customer names and phone numbers', 
   'إعادة إرسال تأكيد البريد':'Resend email confirmation',
@@ -4102,11 +4133,11 @@ const EN = {
   ,'النسخ الاحتياطي وإعادة الضبط':'Backup & reset','تنبيه مهم:':'Important:'
 
   ,'الإدارة':'Management','البيع':'Sales','لوحة الإحصائيات':'Dashboard'
-  ,'نقطة البيع POS':'Point of Sale (POS)','ماسح الشاسيه والموتور':'VIN & engine scanner'
-  ,'الموردون والتوريد':'Suppliers & purchasing','المخزن والأسعار':'Inventory & pricing'
-  ,'إدارة الدراجات':'Motorcycle management','الموظفين والأداء':'Staff & performance'
-  ,'المصروفات والحسابات':'Expenses & accounts','الأدوات المالية المتقدمة':'Advanced finance tools'
-  ,'الموارد البشرية والرواتب':'HR & payroll','الجرد والضمان والصيانة':'Stocktake, warranty & service'
+  ,'نظام البيع داخل المعرض':'Point of Sale (POS)','ماسح الشاسيه والموتور':'VIN & engine scanner'
+  ,'الموردون والتوريد':'Suppliers & purchasing','الأسعار':'Inventory & pricing'
+  ,'المعرض / الكتالوج':'Motorcycle management','التعيين وحسابات الموظفين':'Staff & performance'
+  ,'النظام المالي':'Expenses & accounts','النظام المحاسبي':'Advanced finance tools'
+  ,'الموارد البشرية والمرتبات':'HR & payroll','الجرد والضمان والصيانة':'Stocktake, warranty & service'
   ,'إدارة العملاء والعلاقات':'Customer relations','عروض الأسعار والتقسيط':'Quotations & installments'
   ,'طلبات العملاء':'Customer requests','عرض المتجر':'View storefront','المتجر':'Store'
   ,'النسخة تشمل بيانات جداول قاعدة البيانات الـ86، ولا تشمل الملفات الثنائية في Supabase Storage. الاستعادة تستبدل بيانات التشغيل الحالية مع الاحتفاظ بحساب المالك والإعدادات المحاسبية الأساسية وسجل التدقيق.':'The backup includes all 86 database tables, but not binary files in Supabase Storage. Restore replaces operational data while preserving the owner account, core accounting settings, and audit log.'

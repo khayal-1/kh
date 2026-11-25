@@ -237,25 +237,35 @@ p { color: var(--gray-700); }
   padding: 5px 12px 5px 6px;
   border-radius: var(--radius-pill);
   font-size: 0.8rem;
-  max-width: 260px;
+  max-width: 280px;
+  border: 1px solid rgba(255,255,255,0.08);
+  color: inherit;
+  cursor: pointer;
 }
+button.user-chip { font: inherit; }
 .user-chip .avatar {
-  width: 28px; height: 28px;
+  width: 32px; height: 32px;
   background: var(--red);
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 800; font-size: 0.8rem; color: var(--white);
+  font-weight: 800; font-size: 0.85rem; color: var(--white);
   flex-shrink: 0;
+}
+.user-chip-meta {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  align-items: flex-start;
 }
 .user-chip .name {
   font-weight: 700; color: var(--white);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 160px;
+  line-height: 1.2;
 }
 .user-chip .role-badge {
   font-size: 0.6rem;
   background: var(--red);
   color: var(--white);
-  padding: 2px 8px;
+  padding: 1px 8px;
   border-radius: var(--radius-pill);
   font-weight: 700;
   flex-shrink: 0;
