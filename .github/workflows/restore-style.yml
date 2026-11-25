@@ -1,0 +1,23 @@
+name: Restore style.css
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore style.css from good commit
+        run: |
+          git checkout ddfa4e9a489eff1c0779e6a510c3edc81c4bada6 -- style.css
+          git config user.name "khayal-1"
+          git config user.email "motorselkhayal@gmail.com"
+          git add style.css
+          git commit -m "fix: restore style.css from ddfa4e9" || echo "no changes"
+          git push
