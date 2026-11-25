@@ -1350,19 +1350,38 @@ function pageTarget() {
   return `<h2 class="page-title"><i class="fa-solid fa-bullseye"></i> تارجت الشهر</h2><div class="panel"><p>تقارير الأهداف والمبيعات غير مفعّلة حتى تُحفظ بيانات المبيعات في Supabase.</p></div>`;
 }
 
+
+function getMarketPrices() {
+  try { return JSON.parse(localStorage.getItem('kh_market_prices') || '{}') || {}; } catch { return {}; }
+}
+function setMarketPrice(bikeId, price) {
+  const map = getMarketPrices();
+  if (price === '' || price == null || Number.isNaN(Number(price))) delete map[bikeId];
+  else map[bikeId] = Number(price);
+  localStorage.setItem('kh_market_prices', JSON.stringify(map));
+}
+function autoBarcodeFromVin(vin) {
+  const v = String(vin || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (v.length >= 8) return 'BC-' + v.slice(-10);
+  return 'BC-' + Date.now().toString(36).toUpperCase();
+}
+
 function pageInventory() {
   const u = currentUser();
   if (!u || !['staff', 'admin', 'manager', 'owner'].includes(u.role)) return pageLogin();
   if (u.role === 'staff' && !hasAnyPermission('catalog_view', 'catalog_manage')) return pageNoPermission();
   const bikes = (get(DB.BIKES) || []).filter((b) => !b.is_demo);
   const costMap = new Map((state.inventoryCosts || []).map((x) => [x.motorcycle_id, x]));
+  const marketMap = getMarketPrices();
   const canEditPrice = hasRole('admin', 'manager', 'owner') || hasPermission('catalog_manage');
   const canSales = hasRole('admin', 'manager', 'owner') || hasPermission('sales_manage');
   const rows = bikes.map((b) => {
     const cost = costMap.get(b.id) || {};
     const unitCost = Number(cost.unit_cost || 0);
     const sell = Number(b.price || 0);
+    const market = Number(marketMap[b.id] || 0);
     const margin = sell - unitCost;
+    const vsMarket = market > 0 ? sell - market : null;
     const marginPct = sell > 0 ? ((margin / sell) * 100) : 0;
     const sc = b.stock <= 0 ? 'out' : b.stock <= 2 ? 'low' : 'available';
     const st = b.stock <= 0 ? 'نفذ' : b.stock <= 2 ? 'منخفض' : 'متوفر';
@@ -1378,6 +1397,13 @@ function pageInventory() {
       <td><b>${esc(b.name)}</b><br><small>${esc(b.model || '')} · ${esc(b.category || '')}</small></td>
       <td>${unitCost ? money(unitCost) : '<span class="hint">غير مسجّل</span>'}</td>
       <td>${priceCell}</td>
+      <td>${canEditPrice
+      ? `<form id="marketPriceForm" class="inline-form" data-bike-id="${esc(b.id)}">
+           <input type="number" name="market_price" min="0" step="0.01" value="${market || ''}" placeholder="—" style="max-width:110px">
+           <button class="btn btn-outline btn-sm" type="submit">حفظ</button>
+         </form>`
+      : (market ? money(market) : '<span class="hint">—</span>')}</td>
+      <td>${vsMarket == null ? '—' : (vsMarket === 0 ? 'مساوٍ للسوق' : (vsMarket > 0 ? ('أعلى ' + money(vsMarket)) : ('أقل ' + money(Math.abs(vsMarket)))))}</td>
       <td>${unitCost ? money(margin) + '<br><small>' + marginPct.toFixed(1) + '%</small>' : '—'}</td>
       <td>${b.stock}</td>
       <td><span class="status-pill ${sc}">${st}</span></td>
@@ -1390,7 +1416,7 @@ function pageInventory() {
     <p class="page-sub">التحكم الكامل بالأسعار: عرض سعر الشراء (التكلفة) وسعر البيع مع إمكانية تعديله، وربط عروض التقسيط والكتالوج.</p>
 
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-motorcycle"></i></div><div class="stat-label">طرازات مسّل*</div><div class="stat-value">${bikes.length}</div></div>
+      <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-motorcycle"></i></div><div class="stat-label">طرازات مسجّلة</div><div class="stat-value">${bikes.length}</div></div>
       <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-boxes-stacked"></i></div><div class="stat-label">إجمالي المخزون</div><div class="stat-value">${bikes.reduce((s,b)=>s+Number(b.stock||0),0)}</div></div>
       <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-coins"></i></div><div class="stat-label">قيمة البيع المتوقعة</div><div class="stat-value" style="font-size:1.05rem">${money(bikes.reduce((s,b)=>s+Number(b.price||0)*Number(b.stock||0),0))}</div></div>
     </div>
@@ -1406,16 +1432,44 @@ function pageInventory() {
       <p class="hint mt-2">سعر الشراء = تكلفة الوحدة من المورد/الجرد. سعر البيع قابل للتعديل مباشرة من الجدول إن كانت لديك صلاحية الكتالوج. عروض التقسيط تُدار من أداة عروض التقسيط.</p>
     </div>
 
+
+    ${canEditPrice ? `<div class="panel">
+      <div class="panel-title"><i class="fa-solid fa-layer-group"></i> تعديل جماعي لأسعار البيع</div>
+      <form id="bulkPriceForm" class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label>الطرازات (فارغ = الكل)</label>
+            <select name="bike_ids" multiple size="4" style="min-height:90px">${bikes.map((b)=>'<option value="'+esc(b.id)+'">'+esc(b.name)+' — '+money(b.price||0)+'</option>').join('')}</select>
+          </div>
+          <div class="field">
+            <label>طريقة التعديل</label>
+            <select name="mode" required>
+              <option value="set">تعيين سعر ثابت</option>
+              <option value="percent_up">زيادة %</option>
+              <option value="percent_down">تخفيض %</option>
+              <option value="amount_up">زيادة بمبلغ</option>
+              <option value="amount_down">تخفيض بمبلغ</option>
+            </select>
+            <label class="mt-2">القيمة</label>
+            <input type="number" name="value" min="0" step="0.01" required>
+          </div>
+        </div>
+        <button class="btn btn-primary" type="submit"><i class="fa-solid fa-floppy-disk"></i> تطبيق التعديل الجماعي</button>
+      </form>
+      <p class="hint mt-2">سعر السوق يُحفظ على هذا الجهاز لمتابعة المنافسة. الباركود يُولَّد تلقائياً عند تسجيل وحدة بلا باركود.</p>
+    </div>` : ''}
+
     <div class="panel printable-panel">
+
       <div class="panel-title"><i class="fa-solid fa-list"></i> جدول الأسعار (${bikes.length})</div>
       <div class="table-wrap"><table>
         <thead><tr>
           <th>الصورة</th><th>الصنف / الموديل</th>
-          <th>سعر الشراء</th><th>سعر البيع</th><th>هامش الربح</th>
+          <th>سعر الشراء</th><th>سعر البيع</th><th>سعر السوق</th><th>مقارنة السوق</th><th>هامش الربح</th>
           <th>المخزون</th><th>التوفر</th><th>حالة العرض</th>
         </tr></thead>
         <tbody>
-          ${rows || '<tr><td colspan="8">لا توجد أصناف في الكتالوج</td></tr>'}
+          ${rows || '<tr><td colspan="9">لا توجد أصناف في الكتالوج</td></tr>'}
         </tbody>
       </table></div>
     </div>`;
@@ -1464,7 +1518,7 @@ function unitRegistrationFormHTML(motorcycleId) {
     '<p class="hint">هذا الإجراء لإدخال رصيد افتتاحي موجود فعليًا بالمعرض فقط. إذا كانت الدراجة واردة من مورد جديد، استخدم أمر التوريد والاستلام وفاتورة المورد حتى لا تُسجل التكلفة مرتين.</p>' +
     '<form id="motorcycleUnitForm" class="form-grid"><input type="hidden" name="motorcycle_id" value="'+esc(bike.id)+'">' +
     '<div class="form-row"><div class="field"><label>رقم الشاسيه (VIN)</label><input name="vin" required maxlength="80"></div><div class="field"><label>رقم الموتور</label><input name="engine_number" maxlength="80"></div></div>' +
-    '<div class="form-row"><div class="field"><label>الباركود</label><input name="barcode" maxlength="80"></div><div class="field"><label>عداد الكيلومترات</label><input name="odometer_reading" type="number" min="0" step="1" value="0" required></div></div>' +
+    '<div class="form-row"><div class="field"><label>الباركود (يُولَّد تلقائياً من الشاسيه إن تُرك فارغاً)</label><input name="barcode" maxlength="80" placeholder="اختياري — توليد تلقائي"></div><div class="field"><label>عداد الكيلومترات</label><input name="odometer_reading" type="number" min="0" step="1" value="0" required></div></div>' +
     '<div class="form-row"><div class="field"><label>حالة الدراجة</label><select name="unit_condition"><option value="new">جديدة</option><option value="used">مستعملة</option></select></div><div class="field"><label>تكلفة الوحدة الافتتاحية (ج.م)</label><input name="unit_cost" type="number" min="0.01" step="0.01" required></div></div>' +
     '<div class="form-row"><div class="field"><label>بداية الضمان</label><input name="warranty_start" type="date"></div><div class="field"><label>نهاية الضمان</label><input name="warranty_end" type="date"></div></div>' +
     '<div class="field"><label>ملاحظات</label><textarea name="notes" rows="2" maxlength="500"></textarea></div>' +
@@ -2183,7 +2237,7 @@ document.addEventListener('click', async (e) => {
             <b>بيانات الدراجة رقم ${index+1}</b>
             <div class="field"><label>رقم الشاسيه VIN</label><input name="vin" maxlength="80" autocomplete="off" placeholder="VIN إلزامي"></div>
             <div class="field"><label>رقم الموتور</label><input name="engine_number" maxlength="80"></div>
-            <div class="form-row"><div class="field"><label>الباركود</label><input name="barcode" maxlength="80"></div><div class="field"><label>عداد الكيلومترات</label><input name="odometer_reading" type="number" min="0" value="0"></div></div>
+            <div class="form-row"><div class="field"><label>الباركود (يُولَّد تلقائياً من الشاسيه إن تُرك فارغاً)</label><input name="barcode" maxlength="80" placeholder="اختياري — توليد تلقائي"></div><div class="field"><label>عداد الكيلومترات</label><input name="odometer_reading" type="number" min="0" value="0"></div></div>
             <div class="field"><label>الحالة</label><select name="unit_condition"><option value="new">جديدة</option><option value="used">مستعملة</option></select></div>
             <div class="form-row"><div class="field"><label>بداية الضمان</label><input name="warranty_start" type="date"></div><div class="field"><label>نهاية الضمان</label><input name="warranty_end" type="date"></div></div>
           </div>`).join('')}</div>
@@ -2630,6 +2684,46 @@ document.addEventListener('submit', async (e) => {
     toast('تم تحديث سعر البيع','success');
     return;
   }
+
+  if (form.id === 'marketPriceForm') {
+    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية تعديل سعر السوق','error'); return; }
+    const fd = new FormData(form);
+    const bikeId = form.dataset.bikeId;
+    setMarketPrice(bikeId, fd.get('market_price') === '' ? null : Number(fd.get('market_price')));
+    render();
+    toast('تم حفظ سعر السوق','success');
+    return;
+  }
+  if (form.id === 'bulkPriceForm') {
+    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية التعديل الجماعي','error'); return; }
+    if (!supabase) { toast('الاتصال غير متاح','error'); return; }
+    const fd = new FormData(form);
+    const mode = fd.get('mode');
+    const value = Number(fd.get('value'));
+    if (!(value >= 0)) { toast('أدخل قيمة صحيحة','error'); return; }
+    const selected = Array.from(form.querySelectorAll('select[name="bike_ids"] option:checked')).map((o) => o.value);
+    let bikes = (get(DB.BIKES) || []).filter((b) => !b.is_demo);
+    if (selected.length) bikes = bikes.filter((b) => selected.includes(b.id));
+    if (!bikes.length) { toast('لا توجد طرازات للتعديل','error'); return; }
+    const btn = form.querySelector('[type=submit]'); if (btn) btn.disabled = true;
+    let ok = 0, fail = 0;
+    for (const b of bikes) {
+      let price = Number(b.price || 0);
+      if (mode === 'set') price = value;
+      else if (mode === 'percent_up') price = price * (1 + value / 100);
+      else if (mode === 'percent_down') price = price * (1 - value / 100);
+      else if (mode === 'amount_up') price = price + value;
+      else if (mode === 'amount_down') price = Math.max(0, price - value);
+      price = Math.round(price * 100) / 100;
+      const { error } = await supabase.from('motorcycles').update({ price }).eq('id', b.id);
+      if (error) fail += 1; else ok += 1;
+    }
+    if (btn) btn.disabled = false;
+    await Promise.all([loadMotorcycles(), loadInventoryData()]);
+    render();
+    toast('تم تحديث ' + ok + ' طرازاً' + (fail ? (' — فشل ' + fail) : ''), fail ? 'error' : 'success');
+    return;
+  }
   if (form.id === 'inventoryCostForm') {
     if (!hasRole('admin','manager','owner') && !hasPermission('finance_manage') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية تعديل تكلفة المخزون','error'); return; }
     const fd=new FormData(form); const {error}=await supabase.rpc('set_motorcycle_inventory_controls',{p_motorcycle_id:form.dataset.bikeId,p_unit_cost:Number(fd.get('unit_cost')),p_reorder_level:Number(fd.get('reorder_level'))});
@@ -2642,7 +2736,7 @@ document.addEventListener('submit', async (e) => {
       p_motorcycle_id:fd.get('motorcycle_id'),
       p_vin:safeName(fd.get('vin')),
       p_engine_number:safeName(fd.get('engine_number'))||null,
-      p_barcode:safeName(fd.get('barcode'))||null,
+      p_barcode:safeName(fd.get('barcode'))||autoBarcodeFromVin(fd.get('vin')),
       p_warranty_start:fd.get('warranty_start')||null,
       p_warranty_end:fd.get('warranty_end')||null,
       p_notes:safeName(fd.get('notes'))||null,
