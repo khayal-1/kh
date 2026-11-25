@@ -1,0 +1,10 @@
+begin;
+create index if not exists accounting_accounts_parent_code_idx on public.accounting_accounts(parent_code);
+create index if not exists expense_payments_cash_account_idx on public.expense_payments(cash_account_id);
+create index if not exists expense_payments_created_by_idx on public.expense_payments(created_by);
+create index if not exists expense_payments_journal_entry_idx on public.expense_payments(journal_entry_id);
+create index if not exists expenses_created_by_idx on public.expenses(created_by);
+create index if not exists expenses_expense_account_idx on public.expenses(expense_account_id);
+create index if not exists expenses_journal_entry_idx on public.expenses(journal_entry_id);
+create index if not exists journal_entries_created_by_idx on public.journal_entries(created_by);
+commit;

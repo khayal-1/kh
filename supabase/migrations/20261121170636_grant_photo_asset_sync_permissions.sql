@@ -1,0 +1,2 @@
+grant update (telegram_file_unique_id, storage_path, public_url, byte_size, mime_type, optimized, sync_error, sync_attempted_at) on public.photo_assets to authenticated;
+grant delete on public.photo_assets to authenticated;
