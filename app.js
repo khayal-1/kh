@@ -1354,32 +1354,68 @@ function pageInventory() {
   const u = currentUser();
   if (!u || !['staff', 'admin', 'manager', 'owner'].includes(u.role)) return pageLogin();
   if (u.role === 'staff' && !hasAnyPermission('catalog_view', 'catalog_manage')) return pageNoPermission();
-  const bikes = get(DB.BIKES);
-  const isAdmin = u.role === 'admin';
+  const bikes = (get(DB.BIKES) || []).filter((b) => !b.is_demo);
+  const costMap = new Map((state.inventoryCosts || []).map((x) => [x.motorcycle_id, x]));
+  const canEditPrice = hasRole('admin', 'manager', 'owner') || hasPermission('catalog_manage');
+  const canSales = hasRole('admin', 'manager', 'owner') || hasPermission('sales_manage');
+  const rows = bikes.map((b) => {
+    const cost = costMap.get(b.id) || {};
+    const unitCost = Number(cost.unit_cost || 0);
+    const sell = Number(b.price || 0);
+    const margin = sell - unitCost;
+    const marginPct = sell > 0 ? ((margin / sell) * 100) : 0;
+    const sc = b.stock <= 0 ? 'out' : b.stock <= 2 ? 'low' : 'available';
+    const st = b.stock <= 0 ? 'نفذ' : b.stock <= 2 ? 'منخفض' : 'متوفر';
+    const img = (b.images && b.images[0]) || '';
+    const priceCell = canEditPrice
+      ? `<form id="sellPriceForm" class="inline-form" data-bike-id="${esc(b.id)}">
+           <input type="number" name="price" min="0" step="0.01" value="${sell}" required style="max-width:120px">
+           <button class="btn btn-outline btn-sm" type="submit">حفظ</button>
+         </form>`
+      : `<span class="text-red" style="font-weight:900">${money(sell)}</span>`;
+    return `<tr>
+      <td><img class="mini-img" src="${esc(safeImageUrl(img))}" alt="" loading="lazy"></td>
+      <td><b>${esc(b.name)}</b><br><small>${esc(b.model || '')} · ${esc(b.category || '')}</small></td>
+      <td>${unitCost ? money(unitCost) : '<span class="hint">غير مسجّل</span>'}</td>
+      <td>${priceCell}</td>
+      <td>${unitCost ? money(margin) + '<br><small>' + marginPct.toFixed(1) + '%</small>' : '—'}</td>
+      <td>${b.stock}</td>
+      <td><span class="status-pill ${sc}">${st}</span></td>
+      <td><span class="status-pill">${esc(b.status || '—')}</span></td>
+    </tr>`;
+  }).join('');
+
   return `
-    <h2 class="page-title"><i class="fa-solid fa-boxes-stacked"></i> الأسعار</h2>
-    <p class="page-sub">${isAdmin ? 'لديك صلاحية كاملة للتعديل من قسم المعرض / الكتالوج' : 'للاطلاع والبيع فقط'}</p>
+    <h2 class="page-title"><i class="fa-solid fa-tags"></i> الأسعار</h2>
+    <p class="page-sub">التحكم الكامل بالأسعار: عرض سعر الشراء (التكلفة) وسعر البيع مع إمكانية تعديله، وربط عروض التقسيط والكتالوج.</p>
+
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-motorcycle"></i></div><div class="stat-label">طرازات مسّل*</div><div class="stat-value">${bikes.length}</div></div>
+      <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-boxes-stacked"></i></div><div class="stat-label">إجمالي المخزون</div><div class="stat-value">${bikes.reduce((s,b)=>s+Number(b.stock||0),0)}</div></div>
+      <div class="stat-card"><div class="stat-icon"><i class="fa-solid fa-coins"></i></div><div class="stat-label">قيمة البيع المتوقعة</div><div class="stat-value" style="font-size:1.05rem">${money(bikes.reduce((s,b)=>s+Number(b.price||0)*Number(b.stock||0),0))}</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title"><i class="fa-solid fa-screwdriver-wrench"></i> أدوات الأسعار والكتالوج</div>
+      <div class="invoice-actions">
+        ${canEditPrice ? '<button class="btn btn-primary btn-sm" data-nav="manage-bikes"><i class="fa-solid fa-motorcycle"></i> المعرض / الكتالوج (إضافة وتعديل)</button>' : ''}
+        ${canSales ? '<button class="btn btn-outline btn-sm" data-nav="sales-tools"><i class="fa-solid fa-file-invoice-dollar"></i> عروض التقسيط وتعديلها</button>' : ''}
+        ${(hasRole('admin','manager','owner')||hasPermission('catalog_manage')||hasPermission('finance_manage')) ? '<button class="btn btn-outline btn-sm" data-nav="inventory-tools"><i class="fa-solid fa-warehouse"></i> تكلفة الوحدة والجرد</button>' : ''}
+        <button class="btn btn-outline btn-sm" data-nav="pos"><i class="fa-solid fa-cash-register"></i> البيع من المعرض</button>
+      </div>
+      <p class="hint mt-2">سعر الشراء = تكلفة الوحدة من المورد/الجرد. سعر البيع قابل للتعديل مباشرة من الجدول إن كانت لديك صلاحية الكتالوج. عروض التقسيط تُدار من أداة عروض التقسيط.</p>
+    </div>
+
     <div class="panel printable-panel">
+      <div class="panel-title"><i class="fa-solid fa-list"></i> جدول الأسعار (${bikes.length})</div>
       <div class="table-wrap"><table>
         <thead><tr>
-          <th>الصورة</th><th>الاسم</th><th>الموديل</th><th>الفئة</th>
-          <th>السعر</th><th>المخزون</th><th>الحالة</th>
+          <th>الصورة</th><th>الصنف / الموديل</th>
+          <th>سعر الشراء</th><th>سعر البيع</th><th>هامش الربح</th>
+          <th>المخزون</th><th>التوفر</th><th>حالة العرض</th>
         </tr></thead>
         <tbody>
-          ${bikes.map((b) => {
-            const sc = b.stock <= 0 ? 'out' : b.stock <= 2 ? 'low' : 'available';
-            const st = b.stock <= 0 ? 'نفذ' : b.stock <= 2 ? 'منخفض' : 'متوفر';
-            const img = (b.images && b.images[0]) || '';
-            return `<tr>
-              <td><img class="mini-img" src="${esc(safeImageUrl(img))}" alt="" loading="lazy"></td>
-              <td><b>${esc(b.name)}</b>${b.is_demo ? '<small class="demo-data-label">تجريبية</small>' : ''} </td>
-              <td>${esc(b.model)}</td>
-              <td>${esc(b.category)}</td>
-              <td class="text-red" style="font-weight:900">${money(b.price)}</td>
-              <td>${b.stock}</td>
-              <td><span class="status-pill ${sc}">${st}</span></td>
-            </tr>`;
-          }).join('')}
+          ${rows || '<tr><td colspan="8">لا توجد أصناف في الكتالوج</td></tr>'}
         </tbody>
       </table></div>
     </div>`;
@@ -1766,6 +1802,7 @@ function navigate(route) {
   render();
   if (route === 'dashboard' && state.user?.role === 'admin') Promise.all([loadSalesData(),loadPurchasingData(),loadFinanceData()]).then(render);
   if (route === 'manage-bikes' && state.user) Promise.all([loadMotorcycles(),loadMotorcycleUnits()]).then(render);
+  if (route === 'inventory' && state.user) Promise.all([loadMotorcycles(),loadInventoryData()]).then(render);
   if (route === 'staff' && state.user?.role === 'admin') loadStaffDirectory().then(render);
   if (route === 'pos') Promise.all([loadSalesData(),loadMotorcycles(),loadMotorcycleUnits(),loadSalesCashAccounts()]).then(render);
   if (route === 'vin-scanner') Promise.all([loadMotorcycles(),loadSalesData(),loadSalesCashAccounts()]).then(render);
@@ -2577,6 +2614,22 @@ document.addEventListener('submit', async (e) => {
     if(error){toast(error.message||'تعذر تحديث الإشعار','error');return;}await loadCRMData();render();toast('تم تحديد الإشعار كمقروء','success');return;
   }
 
+  if (form.id === 'sellPriceForm') {
+    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية تعديل سعر البيع','error'); return; }
+    if (!supabase) { toast('الاتصال غير متاح','error'); return; }
+    const fd = new FormData(form);
+    const bikeId = form.dataset.bikeId;
+    const price = Number(fd.get('price'));
+    if (!bikeId || !(price >= 0)) { toast('أدخل سعراً صحيحاً','error'); return; }
+    const btn = form.querySelector('[type=submit]'); if (btn) btn.disabled = true;
+    const { error } = await supabase.from('motorcycles').update({ price }).eq('id', bikeId);
+    if (btn) btn.disabled = false;
+    if (error) { toast(error.message || 'تعذر حفظ سعر البيع','error'); return; }
+    await Promise.all([loadMotorcycles(), loadInventoryData()]);
+    render();
+    toast('تم تحديث سعر البيع','success');
+    return;
+  }
   if (form.id === 'inventoryCostForm') {
     if (!hasRole('admin','manager','owner') && !hasPermission('finance_manage') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية تعديل تكلفة المخزون','error'); return; }
     const fd=new FormData(form); const {error}=await supabase.rpc('set_motorcycle_inventory_controls',{p_motorcycle_id:form.dataset.bikeId,p_unit_cost:Number(fd.get('unit_cost')),p_reorder_level:Number(fd.get('reorder_level'))});
