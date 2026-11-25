@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  // GitHub Pages is the primary project site; Vercel serves from the domain root.
-  base: process.env.VERCEL ? '/' : '/elkhayal-motors/',
+  // GitHub Pages project site path matches the repository name.
+  base: process.env.VERCEL ? '/' : '/kh/',
   envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
   build: {
     target: 'es2020',
