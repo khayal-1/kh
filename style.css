@@ -1437,8 +1437,8 @@ td .mini-img {
 /* Fast, touch-friendly showroom search */
 .showroom-search {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(170px, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
   align-items: end;
   margin: 4px 0 14px;
   padding: 12px;
@@ -1446,7 +1446,9 @@ td .mini-img {
   border-radius: var(--radius);
   background: var(--gray-50);
 }
-.showroom-search .field { margin: 0; }
+.showroom-search .field { margin: 0; min-width: 0; }
+.showroom-search .field:first-child { grid-column: span 2; }
+@media (max-width: 760px) { .showroom-search .field:first-child { grid-column: auto; } }
 .showroom-search input, .showroom-search select { min-height: 46px; }
 @media (max-width: 640px) {
   .showroom-search { grid-template-columns: 1fr; gap: 8px; padding: 10px; }

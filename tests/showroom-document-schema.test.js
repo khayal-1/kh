@@ -57,6 +57,8 @@ test('supplier invoice RPC binds received units once and serializes concurrent b
 
 test('showroom loads supplier invoice references only for purchasing-authorized staff', () => {
   assert.match(app, /async function loadShowroomSupplierRefs\(\)[\s\S]*?if \(!supabase \|\| !canManagePurchasing\(\)\) return/);
-  assert.ok(app.includes("supplier_bill_items!inner(supplier_bill_id,purchase_receipt_item_id,supplier_bills!inner(bill_number,suppliers!inner(name)),purchase_receipt_items(purchase_receipts(receipt_number)))"));
+  assert.ok(app.includes("supplier_bill_items!inner(supplier_bill_id,supplier_bills!inner(bill_number,suppliers!inner(name)))"));
+  assert.ok(app.includes("purchase_receipt_items!inner(purchase_receipts!inner(receipt_number,received_at))"));
   assert.match(app, /purchaseRef\.supplier_bill_number/);
+  assert.match(app, /received_at:receipt\.received_at/);
 });

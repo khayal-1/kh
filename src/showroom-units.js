@@ -7,8 +7,25 @@ export function normalizeShowroomSearch(value) {
   return String(value || '').toLocaleLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
-export function matchesShowroomUnit(unit, query, status = 'all') {
+export function matchesShowroomUnit(unit, query, status = 'all', filters = {}) {
   if (status !== 'all' && unit?.unit_status !== status) return false;
+  const modelId = String(filters.modelId || 'all');
+  if (modelId !== 'all' && String(unit?.motorcycle_id || unit?.motorcycles?.id || '') !== modelId) return false;
+
+  const rawPrice = unit?.sale_price ?? unit?.motorcycles?.price;
+  const price = rawPrice === '' || rawPrice == null ? Number.NaN : Number(rawPrice);
+  const minPrice = filters.minPrice === '' || filters.minPrice == null ? null : Number(filters.minPrice);
+  const maxPrice = filters.maxPrice === '' || filters.maxPrice == null ? null : Number(filters.maxPrice);
+  if (minPrice != null && (!Number.isFinite(price) || price < minPrice)) return false;
+  if (maxPrice != null && (!Number.isFinite(price) || price > maxPrice)) return false;
+
+  const receivedDate = unit?.received_at ? new Date(unit.received_at) : null;
+  const receivedAt = receivedDate && !Number.isNaN(receivedDate.getTime())
+    ? `${receivedDate.getFullYear()}-${String(receivedDate.getMonth() + 1).padStart(2, '0')}-${String(receivedDate.getDate()).padStart(2, '0')}`
+    : '';
+  if (filters.receivedFrom && (!receivedAt || receivedAt < filters.receivedFrom)) return false;
+  if (filters.receivedTo && (!receivedAt || receivedAt > filters.receivedTo)) return false;
+
   const needle = normalizeShowroomSearch(query);
   if (!needle) return true;
   const model = unit?.motorcycles || {};

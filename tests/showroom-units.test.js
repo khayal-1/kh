@@ -38,3 +38,21 @@ test('duplicate guard catches normalized collisions but allows current record', 
   assert.equal(findDuplicateUnitIdentifier(units, 'vin', 'new-456'), null);
   assert.equal(findDuplicateUnitIdentifier(units, 'vin', ''), null);
 });
+
+
+test('showroom filters combine model, sale-price range, and inclusive receipt-date bounds', () => {
+  const received = { ...units[0], motorcycle_id: 'model-a', received_at: '2026-11-12T14:30:00Z', motorcycles: { ...units[0].motorcycles, price: 125000 } };
+  const otherModel = { ...units[1], motorcycle_id: 'model-b', received_at: '2026-11-13T00:00:00Z', motorcycles: { ...units[1].motorcycles, price: 180000 } };
+  assert.equal(matchesShowroomUnit(received, '', 'all', { modelId: 'model-a', minPrice: '120000', maxPrice: '125000', receivedFrom: '2026-11-12', receivedTo: '2026-11-12' }), true);
+  assert.equal(matchesShowroomUnit(received, '', 'all', { modelId: 'model-b' }), false);
+  assert.equal(matchesShowroomUnit(received, '', 'all', { minPrice: '125001' }), false);
+  assert.equal(matchesShowroomUnit(received, '', 'all', { maxPrice: '124999' }), false);
+  assert.equal(matchesShowroomUnit(received, '', 'all', { receivedFrom: '2026-11-13' }), false);
+  assert.equal(matchesShowroomUnit(received, '', 'all', { receivedTo: '2026-11-11' }), false);
+  assert.equal(matchesShowroomUnit(otherModel, '', 'all', { receivedFrom: '2026-11-12', receivedTo: '2026-11-13' }), true);
+});
+
+test('date filters exclude units with no recorded receipt date rather than guessing from registration', () => {
+  assert.equal(matchesShowroomUnit(units[0], '', 'all', { receivedFrom: '2026-01-01' }), false);
+  assert.equal(matchesShowroomUnit(units[0], '', 'all', { receivedTo: '2026-12-31' }), false);
+});
