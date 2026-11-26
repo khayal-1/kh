@@ -1,5 +1,7 @@
 import { supabase, supabaseConfigured, getCurrentProfile } from './src/supabase.js';
 import { esc, safeImageUrl } from './src/security.js';
+import { findDuplicateUnitIdentifier, matchesShowroomUnit, normalizeShowroomSearch, normalizeUnitIdentifier } from './src/showroom-units.js';
+import { canDeleteMotorcycleDocument, cleanMotorcycleDocumentName, motorcycleDocumentPath, validateMotorcycleDocument } from './src/showroom-documents.js';
 import { applyQueryResults } from './src/purchasing-results.js';
 import { fmtMarketPrice, sparklineSvg, changeHtml, filterMarketRows } from './src/market-analysis.js';
 
@@ -104,6 +106,7 @@ const state = {
   payrollPayments: [],
   inventoryCosts: [],
   motorcycleUnits: [],
+  unitSupplierRefs: {},
   inventoryReconciliation: [],
   storeUnits: [],
   stocktakeBatches: [],
@@ -224,6 +227,7 @@ function hasPermission(permission) {
   return !!user && (user.role === 'admin' || user.permissions?.includes(permission));
 }
 function hasAnyPermission(...permissions) { return permissions.some(hasPermission); }
+function canManagePurchasing() { return hasRole('admin','manager','owner') || hasPermission('purchasing_manage'); }
 function hasRequestAccess() { return hasAnyPermission('requests_view', 'requests_manage'); }
 function pageNoPermission() {
   return '<div class="panel"><p>ليس لديك صلاحية لعرض هذا القسم. تواصل مع المدير إذا كنت تحتاجها.</p></div>';
@@ -313,7 +317,10 @@ function sidebarItems() {
     items.push({ section: 'نظام البيع داخل المعرض' });
     items.push({ route: 'pos', label: 'نظام البيع داخل المعرض', icon: 'fa-cash-register' });
     items.push({ route: 'vin-scanner', label: 'الماسح الضوئي (شاسيه/باركود)', icon: 'fa-barcode' });
-    if (isAdminLike) items.push({ route: 'suppliers', label: 'الموردون والتوريد', icon: 'fa-truck-ramp-box' });
+  }
+  if (isAdminLike || hasPermission('purchasing_manage')) {
+    if (!isAdminLike && !hasPermission('sales_manage')) items.push({ section: 'المشتريات والتوريد' });
+    items.push({ route: 'suppliers', label: 'الموردون والتوريد', icon: 'fa-truck-ramp-box' });
   }
 
   if (isAdminLike || hasAnyPermission('catalog_view', 'catalog_manage', 'sales_manage')) {
@@ -793,7 +800,7 @@ async function lookupUnitByCode(rawCode) {
   const columns = ['vin','engine_number','barcode'];
   for (const column of columns) {
     const { data, error } = await supabase.from('motorcycle_units')
-      .select('id,motorcycle_id,vin,engine_number,barcode,unit_status,sale_item_id,warranty_start,warranty_end,notes,registered_at,odometer_reading,unit_condition,is_demo,motorcycles(id,name,model_year,category,price,stock,image_urls,description)')
+      .select('id,motorcycle_id,vin,engine_number,barcode,unit_year,unit_color,unit_status,sale_item_id,warranty_start,warranty_end,notes,registered_at,odometer_reading,unit_condition,is_demo,motorcycles(id,name,model_year,category,price,stock,image_urls,description)')
       .ilike(column, code)
       .limit(2);
     if (error) throw error;
@@ -820,7 +827,7 @@ function renderVinUnitMatch(unit) {
   const available = unit.unit_status === 'available' && Number(bike.stock || 0) > 0;
   const image = bike.image_urls?.[0] ? '<img class="vin-unit-image" src="'+esc(safeImageUrl(bike.image_urls[0]))+'" alt="'+esc(bike.name)+'">' : '<div class="vin-unit-image vin-unit-placeholder"><i class="fa-solid fa-motorcycle"></i></div>';
   target.innerHTML = '<div class="vin-unit-card">'+image+'<div class="vin-unit-details"><div class="contact-actions"><span class="status-badge '+(available?'success':'danger')+'">'+(available?'متاحة للبيع':'غير متاحة للبيع')+'</span><b>'+esc(bike.name||'طراز غير معروف')+'</b></div>'+
-    '<div class="vin-unit-grid"><div><small>الموديل</small><b>'+esc(bike.model_year||'—')+'</b></div><div><small>الفئة</small><b>'+esc(bike.category||'—')+'</b></div><div><small>السعر</small><b>'+money(bike.price)+'</b></div><div><small>المخزون العام</small><b>'+Number(bike.stock||0)+'</b></div><div><small>رقم الشاسيه VIN</small><b>'+esc(unit.vin||'—')+'</b></div><div><small>رقم الموتور</small><b>'+esc(unit.engine_number||'—')+'</b></div><div><small>العداد</small><b>'+Number(unit.odometer_reading||0).toLocaleString('en-US')+' كم</b></div><div><small>حالة الدراجة</small><b>'+(unit.unit_condition==='used'?'مستعملة':'جديدة')+'</b></div><div><small>الباركود</small><b>'+esc(unit.barcode||'—')+'</b></div><div><small>حالة الوحدة</small><b>'+(unit.is_demo?'بيانات تجريبية — غير قابلة للبيع':esc(unit.unit_status))+'</b></div><div><small>الضمان</small><b>'+esc(unit.warranty_start||'—')+' – '+esc(unit.warranty_end||'—')+'</b></div></div>'+
+    '<div class="vin-unit-grid"><div><small>سنة الوحدة</small><b>'+esc(unit.unit_year||bike.model_year||'—')+'</b></div><div><small>لون الوحدة</small><b>'+esc(unit.unit_color||'—')+'</b></div><div><small>الفئة</small><b>'+esc(bike.category||'—')+'</b></div><div><small>السعر</small><b>'+money(bike.price)+'</b></div><div><small>المخزون العام</small><b>'+Number(bike.stock||0)+'</b></div><div><small>رقم الشاسيه VIN</small><b>'+esc(unit.vin||'—')+'</b></div><div><small>رقم الموتور</small><b>'+esc(unit.engine_number||'—')+'</b></div><div><small>العداد</small><b>'+Number(unit.odometer_reading||0).toLocaleString('en-US')+' كم</b></div><div><small>حالة الدراجة</small><b>'+(unit.unit_condition==='used'?'مستعملة':'جديدة')+'</b></div><div><small>الباركود</small><b>'+esc(unit.barcode||'—')+'</b></div><div><small>حالة الوحدة</small><b>'+(unit.is_demo?'بيانات تجريبية — غير قابلة للبيع':esc(unit.unit_status))+'</b></div><div><small>الضمان</small><b>'+esc(unit.warranty_start||'—')+' – '+esc(unit.warranty_end||'—')+'</b></div></div>'+
     (bike.description?'<p>'+esc(bike.description)+'</p>':'')+'</div></div>'+
     (available?'<form id="vinScannerSaleForm" class="vin-sale-form form-grid" data-unit-id="'+esc(unit.id)+'"><h3><i class="fa-solid fa-cash-register"></i> بيع هذه الوحدة</h3>'+
       '<div class="form-row"><div class="field"><label>حساب العميل (اختياري)</label><select name="customer_user_id"><option value="">عميل نقدي / بدون ربط</option>'+((state.registeredCustomers||[]).map(c=>'<option value="'+esc(c.user_id)+'" data-name="'+esc(c.display_name)+'" data-phone="'+esc(c.phone||'')+'">'+esc(c.display_name)+' — '+esc(c.phone||'بدون هاتف')+'</option>').join(''))+'</select></div><div class="field"><label>اسم العميل</label><input name="customer_name" maxlength="120" placeholder="عميل نقدي"></div><div class="field"><label>هاتف العميل</label><input name="customer_phone" type="tel" maxlength="32"></div></div>'+
@@ -1242,7 +1249,7 @@ function pageExpenses() {
     '<div class="panel"><b>ملاحظة محاسبية:</b> لا توجد أرصدة افتتاحية، ولم يتم بعد ربط قيود المبيعات والمشتريات آليًا بهذا الدفتر؛ لذلك لا تعتبر هذه التقارير قوائم مالية مكتملة قبل استكمال الربط.</div>';
 }
 function pageSuppliers() {
-  if (!currentUser() || currentUser().role !== 'admin') return pageNoPermission();
+  if (!canManagePurchasing()) return pageNoPermission();
   const bikes = state.bikes.filter(b=>b.status!=='archived');
   const activeSuppliers = state.suppliers.filter(s=>s.is_active);
   const statusLabel = {ordered:'قيد التوريد',partially_received:'استلام جزئي',received:'مستلم بالكامل',cancelled:'ملغى'};
@@ -1317,6 +1324,7 @@ function pageSuppliers() {
             <div class="field"><label>قيمة البند (ج.م)</label><input name="direct_amount" type="number" min="0.01" step="0.01" disabled></div>
           </div>
         </div>
+        <div class="field"><label>صورة الفاتورة أو ملف PDF</label><input name="bill_documents" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" multiple><small class="hint">اختياري — ارفعها هنا بعد حفظ الفاتورة، بحد أقصى 15 ميجابايت للملف. يمكن إرفاقها لاحقًا من زر «المرفقات».</small></div>
         <div class="field"><label>ملاحظات</label><textarea name="notes" rows="2" maxlength="1000"></textarea></div>
         <small class="hint">يجب أن يساوي إجمالي الفاتورة مجموع البنود. كل كمية مخزون تُربط بوحدات فعلية من الاستلام، ولا يمكن فوترة الوحدة مرتين.</small>
         <button class="btn btn-primary" type="submit">حفظ فاتورة المورد</button>
@@ -1328,7 +1336,7 @@ function pageSuppliers() {
     </div>
     <div class="panel">
       <div class="panel-title"><i class="fa-solid fa-receipt"></i> فواتير ومدفوعات الموردين (${state.supplierBills.length})</div>
-      ${state.supplierBills.length ? `<div class="table-wrap"><table><thead><tr><th>رقم الفاتورة</th><th>المورد</th><th>التاريخ</th><th>الإجمالي</th><th>المدفوع</th><th>خصم المرتجعات</th><th>المتبقي</th><th>إجراء</th></tr></thead><tbody>${state.supplierBills.map(b=>'<tr><td><b>'+esc(b.bill_number)+'</b></td><td>'+esc(b.supplierName)+'</td><td>'+esc(b.bill_date)+'</td><td>'+money(b.total_amount)+'</td><td>'+money(b.amountPaid)+'</td><td>'+money(b.creditAmount)+'</td><td><b>'+money(b.balanceDue)+'</b></td><td>'+(b.balanceDue>0?'<button class="btn btn-outline btn-sm" data-pay-supplier-bill="'+esc(b.id)+'">تسجيل دفعة</button>':'<span class="status-pill">مسددة</span>')+'</td></tr>').join('')}</tbody></table></div>` : '<div class="empty">لا توجد فواتير موردين مسجلة بعد.</div>'}
+      ${state.supplierBills.length ? `<div class="table-wrap"><table><thead><tr><th>رقم الفاتورة</th><th>المورد</th><th>التاريخ</th><th>الإجمالي</th><th>المدفوع</th><th>خصم المرتجعات</th><th>المتبقي</th><th>إجراء</th></tr></thead><tbody>${state.supplierBills.map(b=>'<tr><td><b>'+esc(b.bill_number)+'</b></td><td>'+esc(b.supplierName)+'</td><td>'+esc(b.bill_date)+'</td><td>'+money(b.total_amount)+'</td><td>'+money(b.amountPaid)+'</td><td>'+money(b.creditAmount)+'</td><td><b>'+money(b.balanceDue)+'</b></td><td><button class="btn btn-outline btn-sm" data-supplier-bill-docs="'+esc(b.id)+'"><i class="fa-solid fa-paperclip"></i> المرفقات</button> '+(b.balanceDue>0?'<button class="btn btn-outline btn-sm" data-pay-supplier-bill="'+esc(b.id)+'">تسجيل دفعة</button>':'<span class="status-pill">مسددة</span>')+'</td></tr>').join('')}</tbody></table></div>` : '<div class="empty">لا توجد فواتير موردين مسجلة بعد.</div>'}
     </div>
     <div class="panel">
       <div class="panel-title"><i class="fa-solid fa-money-bill-transfer"></i> سجل مدفوعات الموردين (${state.supplierPayments.length})</div>
@@ -1604,6 +1612,30 @@ function pageDashboard() {
     </div>`;
 }
 
+function filterShowroomUnitCards() {
+  const query = $('#showroomUnitSearch')?.value || '';
+  const status = $('#showroomUnitStatus')?.value || 'all';
+  let totalVisible = 0;
+  document.querySelectorAll('.bike-folder').forEach(folder => {
+    const modelText = folder.querySelector('.bike-folder-name')?.textContent || '';
+    const cards = [...folder.querySelectorAll('.unit-admin-card')];
+    let visible = 0;
+    cards.forEach(card => {
+      const unit = { unit_status: card.dataset.unitStatus, vin: card.dataset.vin, engine_number: card.dataset.engine,
+        barcode: card.dataset.barcode, unit_year: card.dataset.unitYear, unit_color: card.dataset.unitColor,
+        unit_code: card.dataset.unitCode, supplier_name: card.dataset.supplier, supplier_bill_number: card.dataset.supplierBill,
+        motorcycles: { name: card.dataset.model || modelText } };
+      card.hidden = !matchesShowroomUnit(unit, query, status);
+      if (!card.hidden) visible++;
+    });
+    totalVisible += visible;
+    folder.hidden = cards.length ? visible === 0 : (!!normalizeShowroomSearch(query) && !normalizeShowroomSearch(modelText).includes(normalizeShowroomSearch(query)));
+    if (visible && query) folder.open = true;
+  });
+  const result = $('#showroomUnitResults');
+  if (result) result.textContent = totalVisible ? `الوحدات المطابقة: ${totalVisible}` : 'لا توجد وحدات مطابقة للبحث أو الحالة المحددة.';
+}
+
 function unitStatusLabel(status) {
   return ({available:'متاحة للبيع',reserved:'محجوزة',sold:'مباعة',service:'تحت الصيانة',retired:'مستبعدة من المخزون'})[status] || status || 'غير محددة';
 }
@@ -1621,9 +1653,56 @@ function unitRegistrationFormHTML(motorcycleId) {
     '<p class="hint">تُحفظ تكلفة الوحدة، ويُحدّث متوسط تكلفة مخزون الطراز، ويُنشأ قيد افتتاحي: مدين المخزون ودائن رأس المال. بعد التسجيل تظهر الوحدة في المتجر إذا كانت متاحة.</p>' +
     '<button class="btn btn-primary btn-block" type="submit">حفظ الوحدة</button></form>';
 }
-function unitEditFormHTML(unit) {
-  return '<div class="modal-header"><h3><i class="fa-solid fa-pen"></i> تعديل بيانات الوحدة</h3><button class="modal-close" data-close-modal aria-label="إغلاق"><i class="fa-solid fa-xmark"></i></button></div>' +
-    '<form id="motorcycleUnitEditForm" class="form-grid" data-unit-id="'+esc(unit.id)+'">' +
+function documentUuid() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+async function loadMotorcycleDocuments(targetType, targetId) {
+  const column = targetType === 'unit' ? 'motorcycle_unit_id' : 'supplier_bill_id';
+  const {data,error}=await supabase.from('motorcycle_documents').select('id,target_type,motorcycle_unit_id,supplier_bill_id,storage_path,file_name,mime_type,file_size,created_by,created_at').eq(column,targetId).order('created_at',{ascending:true});
+  if(error) throw error;
+  return Promise.all((data||[]).map(async doc=>{
+    const {data:signed,error:signedError}=await supabase.storage.from('motorcycle-documents').createSignedUrl(doc.storage_path,3600);
+    return {...doc,signed_url:signedError?'':signed?.signedUrl||''};
+  }));
+}
+async function uploadMotorcycleDocuments(targetType, targetId, files) {
+  const column = targetType === 'unit' ? 'motorcycle_unit_id' : targetType === 'supplier_bill' ? 'supplier_bill_id' : null;
+  if(!column) return {uploaded:0,failed:files.length,reason:'نوع المستند غير صالح'};
+  let uploaded=0,failed=0,reason='';
+  for(const file of files){
+    const validation=validateMotorcycleDocument(file);
+    if(validation){failed++;reason=validation;continue;}
+    const id=documentUuid(),storagePath=motorcycleDocumentPath(targetType,targetId,id,file.type);
+    if(!storagePath){failed++;reason='نوع الملف أو وجهته غير مدعوم';continue;}
+    const row={id,target_type:targetType,[column]:targetId,storage_path:storagePath,file_name:cleanMotorcycleDocumentName(file.name),mime_type:file.type,file_size:file.size,created_by:state.user.id};
+    const {error:rowError}=await supabase.from('motorcycle_documents').insert(row);
+    if(rowError){failed++;reason=rowError.message||'تعذر ربط المستند بالسجل';continue;}
+    const {error:storageError}=await supabase.storage.from('motorcycle-documents').upload(storagePath,file,{contentType:file.type,upsert:false});
+    if(storageError){
+      await supabase.storage.from('motorcycle-documents').remove([storagePath]);
+      await supabase.from('motorcycle_documents').delete().eq('id',id);
+      failed++;reason=storageError.message||'تعذر رفع الملف';continue;
+    }
+    uploaded++;
+  }
+  return {uploaded,failed,reason};
+}
+function supplierBillDocumentsFormHTML(bill, documents=[]) {
+  const links=documents.length?'<ul class="unit-document-list">'+documents.map(doc=>'<li>'+(doc.signed_url?'<a href="'+esc(doc.signed_url)+'" target="_blank" rel="noopener noreferrer">'+esc(doc.file_name)+'</a>':'<span>'+esc(doc.file_name)+' (تعذر فتحه الآن)</span>')+(canDeleteMotorcycleDocument(doc,state.user?.id)?'<button type="button" class="btn btn-outline btn-sm" data-delete-motorcycle-document="'+esc(doc.id)+'" data-document-target="supplier_bill" data-target-id="'+esc(bill.id)+'">حذف</button>':'')+'</li>').join('')+'</ul>':'<p class="hint">لا توجد مرفقات لهذه الفاتورة حتى الآن.</p>';
+  return '<div class="modal-header"><h3>مرفقات فاتورة '+esc(bill.bill_number)+' ('+documents.length+')</h3><button class="modal-close" data-close-modal aria-label="إغلاق">×</button></div><p class="hint">'+esc(bill.supplierName||'')+' — الملفات خاصة بموظفي المشتريات المخولين.</p><form id="supplierBillDocumentsForm" class="form-grid" data-bill-id="'+esc(bill.id)+'">'+links+'<div class="field"><label>إضافة صورة أو PDF</label><input name="documents" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" multiple required><small class="hint">حتى 15 ميجابايت لكل ملف.</small></div><button class="btn btn-primary" type="submit">رفع المرفقات</button></form>';
+}
+function unitEditFormHTML(unit, photos = [], documents = [], canUploadDocuments = true) {
+  const photoCards = photos.map(photo => '<figure class="unit-photo-card"><img src="'+esc(safeImageUrl(photo.public_url))+'" alt="صورة الوحدة"><figcaption>'+(photo.is_primary?'الصورة الرئيسية':'')+'</figcaption>'+(photo.is_primary?'':'<button type="button" class="btn btn-outline btn-sm" data-unit-photo-primary="'+esc(photo.id)+'">تعيين كرئيسية</button>')+'</figure>').join('');
+  const documentCards = documents.length ? '<ul class="unit-document-list">'+documents.map(doc=>'<li>'+(doc.signed_url?'<a href="'+esc(doc.signed_url)+'" target="_blank" rel="noopener noreferrer">'+esc(doc.file_name)+'</a>':'<span>'+esc(doc.file_name)+' (تعذر فتحه الآن)</span>')+(canDeleteMotorcycleDocument(doc,state.user?.id)?'<button type="button" class="btn btn-outline btn-sm" data-delete-motorcycle-document="'+esc(doc.id)+'" data-document-target="unit" data-target-id="'+esc(unit.id)+'">حذف</button>':'')+'</li>').join('')+'</ul>' : '<p class="hint">لا توجد مستندات مرتبطة بهذه الوحدة.</p>';
+  return '<div class="modal-header"><h3><i class="fa-solid fa-pen"></i> تفاصيل الوحدة وتعديلها</h3><button class="modal-close" data-close-modal aria-label="إغلاق"><i class="fa-solid fa-xmark"></i></button></div>' +
+    '<form id="motorcycleUnitEditForm" class="form-grid" data-unit-id="'+esc(unit.id)+'" data-has-primary="'+(photos.some(photo=>photo.is_primary)?'true':'false')+'">' +
+    '<section class="unit-photo-section"><h4>صور هذه الوحدة</h4>'+(photoCards||'<p class="hint">لا توجد صور خاصة مسجلة لهذه الوحدة بعد.</p>')+'<div class="field"><label>إضافة صور من الجهاز أو الكاميرا</label><input name="unit_photos" type="file" accept="image/*" capture="environment" multiple><small class="hint">تُضغط الصور إلى JPEG بعرض أقصى 1600 بكسل. أول صورة مرفوعة تصبح الرئيسية إذا لم توجد صورة رئيسية.</small></div></section>' +
+    '<section class="unit-document-section"><h4>مستندات الوحدة</h4>'+documentCards+(canUploadDocuments?'<div class="field"><label>إضافة مستندات أو فاتورة</label><input name="unit_documents" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" multiple><small class="hint">PDF أو صور، حتى 15 ميجابايت للملف.</small></div>':'')+'</section>' +
+    '<div class="form-row"><div class="field"><label>سنة صنع الوحدة</label><input name="unit_year" type="number" inputmode="numeric" min="1900" max="2200" value="'+esc(unit.unit_year||unit.motorcycles?.model_year||'')+'" placeholder="اختياري"></div><div class="field"><label>لون الوحدة</label><input name="unit_color" maxlength="60" value="'+esc(unit.unit_color||'')+'" placeholder="اختياري"></div></div>' +
     '<div class="form-row"><div class="field"><label>رقم الشاسيه (VIN)</label><input name="vin" required maxlength="80" value="'+esc(unit.vin)+'"></div><div class="field"><label>رقم الموتور</label><input name="engine_number" maxlength="80" value="'+esc(unit.engine_number||'')+'"></div></div>' +
     '<div class="form-row"><div class="field"><label>الباركود</label><input name="barcode" maxlength="80" value="'+esc(unit.barcode||'')+'"></div><div class="field"><label>عداد الكيلومترات</label><input name="odometer_reading" type="number" min="0" step="1" required value="'+Number(unit.odometer_reading||0)+'"></div></div>' +
     '<div class="form-row"><div class="field"><label>حالة الدراجة</label><select name="unit_condition"><option value="new" '+(unit.unit_condition==='new'?'selected':'')+'>جديدة</option><option value="used" '+(unit.unit_condition==='used'?'selected':'')+'>مستعملة</option></select></div><div class="field"><label>حالة المخزون</label><select name="unit_status">'+['available','reserved','service',...(unit.sale_item_id?['sold']:[]),'retired'].map((status)=>'<option value="'+status+'" '+(unit.unit_status===status?'selected':'')+'>'+unitStatusLabel(status)+'</option>').join('')+'</select></div></div>' +
@@ -1655,11 +1734,13 @@ function pageManageBikes() {
     const rows = list.map((x) => {
       const visibleInStore = !x.is_demo && !b.is_demo && x.unit_status === 'available';
       const canDelete = !x.sale_item_id && x.unit_status !== 'sold';
-      return '<article class="unit-admin-card '+(x.is_demo||b.is_demo?'demo-unit-row':'')+'">' +
+      const purchaseRef = state.unitSupplierRefs?.[x.id] || {};
+      const supplierText = [purchaseRef.supplier_name, purchaseRef.supplier_bill_number, purchaseRef.receipt_number].filter(Boolean).join(' ');
+      return '<article class="unit-admin-card '+(x.is_demo||b.is_demo?'demo-unit-row':'')+'" data-unit-status="'+esc(x.unit_status)+'" data-vin="'+esc(x.vin)+'" data-engine="'+esc(x.engine_number||'')+'" data-barcode="'+esc(x.barcode||'')+'" data-unit-code="'+esc(x.barcode||'')+'" data-supplier="'+esc(purchaseRef.supplier_name||'')+'" data-supplier-bill="'+esc(purchaseRef.supplier_bill_number||'')+'" data-unit-year="'+esc(x.unit_year||'')+'" data-unit-color="'+esc(x.unit_color||'')+'" data-model="'+esc([b.name,b.model,b.category].filter(Boolean).join(' '))+'">' +
         '<div class="unit-admin-main"><div><b>شاسيه: <span dir="ltr">'+esc(x.vin)+'</span></b><small>موتور: <span dir="ltr">'+esc(x.engine_number||'غير مسجل')+'</span></small></div>' +
         '<span class="status-pill '+(x.unit_status==='available'?'available':x.unit_status==='sold'?'out':'pending')+'">'+unitStatusLabel(x.unit_status)+'</span>' +
         '<span class="status-pill '+(visibleInStore?'available':'pending')+'">'+(visibleInStore?'تظهر في المتجر تلقائيًا':'لا تظهر — ليست متاحة للبيع')+'</span>'+(x.is_demo||b.is_demo?'<small class="demo-data-label">تجريبية</small>':'')+'</div>' +
-        '<div class="unit-admin-meta"><span>'+(x.unit_condition==='used'?'مستعملة':'جديدة')+'</span><span>العداد: '+Number(x.odometer_reading||0).toLocaleString('en-US')+' كم</span><span>باركود: '+esc(x.barcode||'—')+'</span></div>' +
+        '<div class="unit-admin-meta"><span>'+(x.unit_condition==='used'?'مستعملة':'جديدة')+'</span><span>السنة: '+esc(x.unit_year||b.model_year||'—')+'</span><span>اللون: '+esc(x.unit_color||'—')+'</span><span>العداد: '+Number(x.odometer_reading||0).toLocaleString('en-US')+' كم</span><span>كود/باركود: '+esc(x.barcode||'—')+'</span>'+(supplierText?'<span>المورد والفاتورة: '+esc(supplierText)+'</span>':'')+'</div>' +
         '<div class="unit-admin-meta"><span>الضمان: '+esc(x.warranty_start||'—')+' إلى '+esc(x.warranty_end||'—')+'</span><span>تسجيل: '+esc((x.registered_at||'').slice(0,10)||'—')+'</span></div>' +
         (x.notes?'<p class="hint">'+esc(x.notes)+'</p>':'') +
         '<div class="unit-admin-actions"><button class="btn btn-outline btn-sm" data-edit-unit="'+esc(x.id)+'"><i class="fa-solid fa-pen"></i> تعديل الوحدة</button>' +
@@ -1675,7 +1756,7 @@ function pageManageBikes() {
   return '<h2 class="page-title"><i class="fa-solid fa-motorcycle"></i> المعرض / الكتالوج والمخزون</h2>' +
     '<p class="page-sub">كل مجلد يمثل نوعاً واحداً. افتح المجلد لرؤية كل دراجة فعلية وأرقامها وحالتها وتفاصيلها.</p>' +
     '<div class="stats-grid"><div class="stat-card"><div class="stat-label">أنواع الدراجات</div><div class="stat-value">'+bikes.length+'</div></div><div class="stat-card"><div class="stat-label">إجمالي الوحدات المسجلة</div><div class="stat-value">'+totalUnits+'</div></div><div class="stat-card"><div class="stat-label">وحدات متاحة للبيع</div><div class="stat-value">'+availableUnits+'</div></div><div class="stat-card"><div class="stat-label">معروضة على المتجر</div><div class="stat-value">'+publishedUnits+'</div></div><div class="stat-card"><div class="stat-label">وحدات مباعة</div><div class="stat-value">'+soldUnits+'</div></div><div class="stat-card"><div class="stat-label">سجلات تجريبية</div><div class="stat-value">'+demoUnits+'</div></div></div>' +
-    '<div class="panel"><div class="bike-folder-toolbar"><button class="btn btn-primary" id="addBikeBtn"><i class="fa-solid fa-plus"></i> إضافة نوع دراجة</button><button class="btn btn-outline" id="syncTelegramPhotosBtn"><i class="fa-solid fa-rotate"></i> مزامنة الصور</button></div><p class="hint">المخزون الفعلي هو المتجر نفسه: كل وحدة حقيقية متاحة للبيع تظهر تلقائيًا، وتختفي تلقائيًا عند بيعها أو حجزها أو تحويلها للصيانة. حذف السجل متاح فقط للوحدات غير المرتبطة بمبيعات أو مستندات مخزون.</p>' +
+    '<div class="panel"><div class="bike-folder-toolbar"><button class="btn btn-primary" id="addBikeBtn"><i class="fa-solid fa-plus"></i> إضافة نوع دراجة</button><button class="btn btn-outline" id="syncTelegramPhotosBtn"><i class="fa-solid fa-rotate"></i> مزامنة الصور</button></div><div class="showroom-search"><div class="field"><label for="showroomUnitSearch">بحث عن وحدة فعلية</label><input id="showroomUnitSearch" type="search" inputmode="search" placeholder="شاسيه، موتور، باركود، مورد، رقم فاتورة أو موديل" autocomplete="off"></div><div class="field"><label for="showroomUnitStatus">الحالة</label><select id="showroomUnitStatus"><option value="all">كل الحالات</option><option value="available">متاحة للبيع</option><option value="reserved">محجوزة</option><option value="sold">مباعة</option><option value="service">تحت الصيانة</option><option value="retired">مستبعدة</option></select></div></div><p id="showroomUnitResults" class="hint" aria-live="polite">إجمالي الوحدات المعروضة: '+totalUnits+'</p><p class="hint">المخزون الفعلي هو المتجر نفسه: كل وحدة حقيقية متاحة للبيع تظهر تلقائيًا، وتختفي تلقائيًا عند بيعها أو حجزها أو تحويلها للصيانة. حذف السجل متاح فقط للوحدات غير المرتبطة بمبيعات أو مستندات مخزون.</p>' +
     (groups || '<div class="empty">لا توجد أنواع دراجات مسجلة.</div>')+'</div>';
 }
 
@@ -1952,7 +2033,7 @@ function navigate(route) {
   closeSidebar();
   render();
   if (route === 'dashboard' && state.user?.role === 'admin') Promise.all([loadSalesData(),loadPurchasingData(),loadFinanceData()]).then(render);
-  if (route === 'manage-bikes' && state.user) Promise.all([loadMotorcycles(),loadMotorcycleUnits()]).then(render);
+  if (route === 'manage-bikes' && state.user) Promise.all([loadMotorcycles(),loadMotorcycleUnits()]).then(async()=>{await loadShowroomSupplierRefs();render();});
   if (route === 'market-analysis' && state.user) loadMarketAnalysis(false).then(render);
   if (route === 'inventory' && state.user) Promise.all([loadMotorcycles(),loadInventoryData()]).then(render);
   if (route === 'staff' && state.user?.role === 'admin') loadStaffDirectory().then(render);
@@ -2150,7 +2231,7 @@ document.addEventListener('click', async (e) => {
     e.preventDefault();
     const route = nav.dataset.nav;
     navigate(route);
-    if (route === 'suppliers' && state.user?.role === 'admin') {
+    if (route === 'suppliers' && canManagePurchasing()) {
       const load = Promise.all([loadPurchasingData(), loadMotorcycles()]);
       render();
       load.then(render).catch((error) => {
@@ -2286,6 +2367,36 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  const supplierBillDocsButton=e.target.closest('[data-supplier-bill-docs]');
+  if(supplierBillDocsButton){
+    if(!canManagePurchasing()){toast('ليس لديك صلاحية إدارة مرفقات فواتير الموردين','error');return;}
+    const bill=state.supplierBills.find(item=>item.id===supplierBillDocsButton.dataset.supplierBillDocs);if(!bill)return;
+    try{openModal(supplierBillDocumentsFormHTML(bill,await loadMotorcycleDocuments('supplier_bill',bill.id)));}
+    catch(error){toast('تعذر تحميل المرفقات؛ تحقق من تطبيق مهاجرة المستندات وصلاحيات المشتريات','error');}
+    return;
+  }
+  const deleteDocumentButton=e.target.closest('[data-delete-motorcycle-document]');
+  if(deleteDocumentButton){
+    const targetType=deleteDocumentButton.dataset.documentTarget,targetId=deleteDocumentButton.dataset.targetId;
+    if(!confirm('حذف هذا المستند نهائيًا؟'))return;
+    deleteDocumentButton.disabled=true;
+    const {data:doc,error:readError}=await supabase.from('motorcycle_documents').select('id,storage_path').eq('id',deleteDocumentButton.dataset.deleteMotorcycleDocument).maybeSingle();
+    if(readError||!doc){deleteDocumentButton.disabled=false;toast(readError?.message||'المستند غير موجود أو لا يمكن الوصول إليه','error');return;}
+    const {error:storageError}=await supabase.storage.from('motorcycle-documents').remove([doc.storage_path]);
+    if(storageError){deleteDocumentButton.disabled=false;toast('تعذر حذف الملف؛ لم يُحذف سجل المرفق','error');return;}
+    const {error:rowError}=await supabase.from('motorcycle_documents').delete().eq('id',doc.id);
+    if(rowError){toast('حُذف الملف من التخزين لكن تعذر تحديث سجل المرفق','error');return;}
+    try{
+      if(targetType==='unit'){
+        const unit=(state.motorcycleUnits||[]).find(item=>item.id===targetId),photosResult=await supabase.from('motorcycle_unit_photos').select('id,storage_path,is_primary,created_at').eq('motorcycle_unit_id',targetId).order('created_at',{ascending:true});
+        const photos=photosResult.data||[],withUrls=await Promise.all(photos.map(async photo=>({...photo,public_url:(await supabase.storage.from('motorcycle-unit-photos').createSignedUrl(photo.storage_path,3600)).data?.signedUrl||''})));
+        const documents=await loadMotorcycleDocuments('unit',targetId);if(unit)openModal(unitEditFormHTML(unit,withUrls,documents,hasRole('admin','manager','owner')||hasPermission('catalog_manage')));
+      }else{
+        const bill=state.supplierBills.find(item=>item.id===targetId);if(bill)openModal(supplierBillDocumentsFormHTML(bill,await loadMotorcycleDocuments('supplier_bill',targetId)));
+      }
+    }catch(error){toast('تم حذف المستند، وتعذر تحديث قائمة المرفقات','error');}
+    return;
+  }
   const paySupplierBill = e.target.closest('[data-pay-supplier-bill]');
   if(paySupplierBill){
     const bill=state.supplierBills.find(b=>b.id===paySupplierBill.dataset.paySupplierBill);
@@ -2330,18 +2441,19 @@ document.addEventListener('click', async (e) => {
     openModal(`<div class="modal-header"><h3>استلام أمر ${esc(order.order_number)}</h3><button class="modal-close" data-close-modal>×</button></div>
       <form id="receivePurchaseForm" class="form-grid" data-order-id="${esc(order.id)}">
         <div class="form-grid">${pendingItems.map(item=>{const remaining=Number(item.quantity_ordered)-Number(item.quantity_received);return `<div class="purchase-order-row" data-item-id="${esc(item.id)}">
-          <div class="field"><label>${esc(item.motorcycle_name)} — المتبقي ${remaining}</label><input name="quantity" type="number" min="0" max="${remaining}" value="${remaining}" required></div>
-          <div class="form-grid">${Array.from({length:remaining},(_,index)=>`<div class="panel" data-unit-row>
-            <b>بيانات الدراجة رقم ${index+1}</b>
+          <div class="field"><label>${esc(item.motorcycle_name)} — المتبقي ${remaining}</label><input name="quantity" type="number" inputmode="numeric" min="0" max="${remaining}" value="1" required><small class="hint">ابدأ بوحدة واحدة؛ ارفع الكمية لإظهار حقول وحدات إضافية.</small></div>
+          <div class="form-grid">${Array.from({length:remaining},(_,index)=>`<details class="panel receive-unit-step" data-unit-row ${index===0?'open':''} ${index>0?'hidden':''}>
+            <summary><b>بيانات الوحدة رقم ${index+1}</b></summary><div class="form-grid">
             <div class="field"><label>رقم الشاسيه VIN</label><input name="vin" maxlength="80" autocomplete="off" placeholder="VIN إلزامي"></div>
             <div class="field"><label>رقم الموتور</label><input name="engine_number" maxlength="80"></div>
-            <div class="form-row"><div class="field"><label>الباركود (يُولَّد تلقائياً من الشاسيه إن تُرك فارغاً)</label><input name="barcode" maxlength="80" placeholder="اختياري — توليد تلقائي"></div><div class="field"><label>عداد الكيلومترات</label><input name="odometer_reading" type="number" min="0" value="0"></div></div>
+            <div class="form-row"><div class="field"><label>سنة صنع هذه الوحدة</label><input name="unit_year" type="number" inputmode="numeric" min="1900" max="2200" value="${esc(item.model_year||'')}" placeholder="اختياري"></div><div class="field"><label>لون الوحدة</label><input name="unit_color" maxlength="60" placeholder="اختياري"></div></div>
+            <div class="form-row"><div class="field"><label>الباركود (يُولَّد تلقائياً من الشاسيه إن تُرك فارغاً)</label><input name="barcode" maxlength="80" placeholder="اختياري — توليد تلقائي"></div><div class="field"><label>عداد الكيلومترات</label><input name="odometer_reading" type="number" inputmode="numeric" min="0" value="0"></div></div>
             <div class="field"><label>الحالة</label><select name="unit_condition"><option value="new">جديدة</option><option value="used">مستعملة</option></select></div>
             <div class="form-row"><div class="field"><label>بداية الضمان</label><input name="warranty_start" type="date"></div><div class="field"><label>نهاية الضمان</label><input name="warranty_end" type="date"></div></div>
-          </div>`).join('')}</div>
+            </div></details>`).join('')}</div>
         </div>`}).join('')}</div>
         <div class="field"><label>ملاحظات الاستلام</label><textarea name="notes" rows="2" maxlength="1000"></textarea></div>
-        <small class="hint">أدخل رقم الشاسيه لكل دراجة مستلمة. تُنشأ سجلات الوحدات وتُحدّث الكمية وتكلفة الاستلام في معاملة واحدة. يمكن الاستلام على دفعات.</small>
+        <small class="hint">ابدأ بوحدة واحدة، وزِد الكمية عند الحاجة. أدخل رقم الشاسيه لكل وحدة ظاهرة؛ تُنشأ سجلات الوحدات وتُحدّث الكمية والتكلفة في معاملة واحدة. بعد التسجيل أضف الصور والمستندات من تفاصيل الوحدة.</small>
         <button class="btn btn-primary" type="submit">تأكيد الاستلام وربط أرقام الشاسيه</button>
       </form>`);
     return;
@@ -2544,7 +2656,27 @@ document.addEventListener('click', async (e) => {
   if (editUnitButton) {
     if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage') && !hasPermission('finance_manage')) { toast('ليس لديك صلاحية تعديل الوحدة', 'error'); return; }
     const unit = (state.motorcycleUnits || []).find((item)=>item.id===editUnitButton.dataset.editUnit);
-    if (unit) openModal(unitEditFormHTML(unit));
+    if (unit) {
+      const {data:photos,error}=await supabase.from('motorcycle_unit_photos').select('id,storage_path,is_primary,created_at').eq('motorcycle_unit_id',unit.id).order('created_at',{ascending:true});
+      if(error){toast('تعذر تحميل صور الوحدة؛ راجع تطبيق مهاجرة دعم الصور أولاً','error');return;}
+      const withUrls=await Promise.all((photos||[]).map(async photo=>({...photo,public_url:(await supabase.storage.from('motorcycle-unit-photos').createSignedUrl(photo.storage_path,3600)).data?.signedUrl||''})));
+      let documents=[];try{documents=await loadMotorcycleDocuments('unit',unit.id);}catch(docError){console.warn('Unit documents unavailable',docError);}
+      openModal(unitEditFormHTML(unit,withUrls,documents,hasRole('admin','manager','owner')||hasPermission('catalog_manage')));
+    }
+    return;
+  }
+  const primaryUnitPhoto = e.target.closest('[data-unit-photo-primary]');
+  if (primaryUnitPhoto) {
+    if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية إدارة صور الوحدة','error'); return; }
+    primaryUnitPhoto.disabled=true;
+    const {error}=await supabase.rpc('set_motorcycle_unit_primary_photo',{p_photo_id:primaryUnitPhoto.dataset.unitPhotoPrimary});
+    if(error){primaryUnitPhoto.disabled=false;toast(error.message||'تعذر تعيين الصورة الرئيسية','error');return;}
+    const unit=(state.motorcycleUnits||[]).find(item=>item.id===primaryUnitPhoto.closest('form')?.dataset.unitId);
+    const {data:photos, error:readError}=await supabase.from('motorcycle_unit_photos').select('id,storage_path,is_primary,created_at').eq('motorcycle_unit_id',unit?.id||'').order('created_at',{ascending:true});
+    if(readError){toast('تم تحديث الصورة الرئيسية، وتعذر إعادة تحميل الصور','error');return;}
+    const withUrls=await Promise.all((photos||[]).map(async photo=>({...photo,public_url:(await supabase.storage.from('motorcycle-unit-photos').createSignedUrl(photo.storage_path,3600)).data?.signedUrl||''})));
+    let documents=[];if(unit){try{documents=await loadMotorcycleDocuments('unit',unit.id);}catch(docError){console.warn('Unit documents unavailable',docError);}}
+    if(unit)openModal(unitEditFormHTML(unit,withUrls,documents,hasRole('admin','manager','owner')||hasPermission('catalog_manage')));
     return;
   }
   const deleteUnitButton = e.target.closest('[data-delete-unit]');
@@ -2830,6 +2962,11 @@ document.addEventListener('submit', async (e) => {
   if (form.id === 'motorcycleUnitForm') {
     if (!hasRole('admin','manager','owner') && !hasPermission('finance_manage') && !hasPermission('catalog_manage')) { toast('ليس لديك صلاحية تسجيل أرقام الهياكل','error'); return; }
     const fd=new FormData(form);
+    for (const [field, label] of [['vin','رقم الشاسيه'],['engine_number','رقم الموتور']]) {
+      const value = safeName(fd.get(field));
+      const duplicate = findDuplicateUnitIdentifier(state.motorcycleUnits, field, value);
+      if (value && duplicate) { toast(`${label} مسجل بالفعل للوحدة ${duplicate.vin || ''}`.trim(), 'error'); form.querySelector(`[name="${field}"]`)?.focus(); return; }
+    }
     const {data:unitId,error}=await supabase.rpc('register_motorcycle_unit_with_engine_number',{
       p_motorcycle_id:fd.get('motorcycle_id'),
       p_vin:safeName(fd.get('vin')),
@@ -2851,8 +2988,11 @@ document.addEventListener('submit', async (e) => {
   if (form.id === 'motorcycleUnitEditForm') {
     if (!hasRole('admin','manager','owner') && !hasPermission('catalog_manage') && !hasPermission('finance_manage')) { toast('ليس لديك صلاحية تعديل الوحدة','error'); return; }
     const fd=new FormData(form);
-    const {error}=await supabase.rpc('update_motorcycle_unit_details',{
+    const yearValue=safeName(fd.get('unit_year'));
+    const {error}=await supabase.rpc('update_motorcycle_unit_details_with_attributes',{
       p_unit_id:form.dataset.unitId,
+      p_unit_year:yearValue?Number(yearValue):null,
+      p_unit_color:safeName(fd.get('unit_color'))||null,
       p_vin:safeName(fd.get('vin')),
       p_engine_number:safeName(fd.get('engine_number')),
       p_barcode:safeName(fd.get('barcode')),
@@ -2864,8 +3004,27 @@ document.addEventListener('submit', async (e) => {
       p_notes:safeName(fd.get('notes'))||null
     });
     if(error){toast(error.message||'تعذر تحديث الوحدة','error');return;}
+    const selectedPhotos=[...(fd.getAll('unit_photos')||[])].filter(file=>file instanceof File&&file.size>0);
+    const selectedDocuments=[...(fd.getAll('unit_documents')||[])].filter(file=>file instanceof File&&file.size>0);
+    let uploaded=0,photoFailure='';
+    for(const [index,original] of selectedPhotos.entries()){
+      let photo;
+      try{photo=await optimizeCatalogImage(original);}catch(imageError){photoFailure=imageError.message||'تعذر تجهيز صورة';break;}
+      const path='units/'+form.dataset.unitId+'/'+(crypto.randomUUID?.()||uid())+'.jpg';
+      const {error:storageError}=await supabase.storage.from('motorcycle-unit-photos').upload(path,photo,{contentType:'image/jpeg',upsert:false});
+      if(storageError){photoFailure=storageError.message||'تعذر رفع صورة الوحدة';break;}
+      const {error:rowError}=await supabase.from('motorcycle_unit_photos').insert({motorcycle_unit_id:form.dataset.unitId,storage_path:path,is_primary:!form.dataset.hasPrimary&&index===0,created_by:state.user.id});
+      if(rowError){await supabase.storage.from('motorcycle-unit-photos').remove([path]);photoFailure=rowError.message||'تعذر ربط الصورة بسجل الوحدة';break;}
+      if(!form.dataset.hasPrimary){form.dataset.hasPrimary='true';}
+      uploaded++;
+    }
+    const documentResult=selectedDocuments.length?await uploadMotorcycleDocuments('unit',form.dataset.unitId,selectedDocuments):{uploaded:0,failed:0};
     await Promise.all([loadMotorcycleUnits(),loadStoreUnits(),loadMotorcycles()]);
-    closeModal();render();toast('تم تحديث بيانات الوحدة وحالتها','success');return;
+    closeModal();render();
+    if(photoFailure)toast(`تم حفظ بيانات الوحدة ورفع ${uploaded} صورة؛ لم يكتمل رفع بقية الصور: ${photoFailure}`,'error');
+    else if(documentResult.failed)toast(`تم حفظ بيانات الوحدة ورفع ${documentResult.uploaded} مستند؛ تعذر رفع ${documentResult.failed}: ${documentResult.reason||'خطأ غير محدد'}`,'error');
+    else toast(selectedPhotos.length||selectedDocuments.length?`تم تحديث الوحدة وحفظ ${uploaded} صورة و${documentResult.uploaded} مستند`:'تم تحديث بيانات الوحدة وحالتها','success');
+    return;
   }
   if (form.id === 'stocktakeForm') {
     if (!hasRole('admin','manager','owner') && !hasPermission('finance_manage')) { toast('الجرد المالي يحتاج صلاحية الإدارة المالية','error'); return; }
@@ -3203,7 +3362,7 @@ document.addEventListener('submit', async (e) => {
     render();toast('تم تسجيل المرتجع رقم '+data.return_number+' وربط '+items.reduce((n,x)=>n+x.unit_ids.length,0)+' وحدة فعلية بالمورد','success');return;
   }
   if(form.id==='supplierBillForm'){
-    if(!hasRole('admin')||!supabase){toast('ليس لديك صلاحية إدارة فواتير الموردين','error');return;}
+    if(!canManagePurchasing()||!supabase){toast('ليس لديك صلاحية إدارة فواتير الموردين','error');return;}
     const fd=new FormData(form),items=[];
     for(const row of form.querySelectorAll('.supplier-bill-line')){
       if(!row.querySelector('[name="selected"]')?.checked)continue;
@@ -3223,18 +3382,34 @@ document.addEventListener('submit', async (e) => {
     }
     if(!items.length){toast('اختر بند استلام واحدًا على الأقل أو أضف بندًا مباشرًا','error');return;}
     const amount=Math.round(items.reduce((n,item)=>n+Math.round(Number(item.quantity)*Number(item.unit_cost)*100)/100,0)*100)/100;
+    const selectedDocuments=[...(fd.getAll('bill_documents')||[])].filter(file=>file instanceof File&&file.size>0);
     const submit=form.querySelector('button[type="submit"]');if(submit)submit.disabled=true;
-    const {error}=await supabase.rpc('create_supplier_bill',{
+    const {data:billData,error}=await supabase.rpc('create_supplier_bill',{
       p_supplier_id:String(fd.get('supplier_id')),p_bill_number:safeName(fd.get('bill_number')),
       p_total_amount:amount,p_bill_date:String(fd.get('bill_date')),p_due_date:fd.get('due_date')||null,
       p_purchase_order_id:fd.get('purchase_order_id')||null,p_notes:safeName(fd.get('notes'))||null,p_items:items
     });
     if(submit)submit.disabled=false;
     if(error){toast(error.message||'تعذر حفظ فاتورة المورد؛ لم يتم تسجيل أي بند أو قيد جزئي','error');return;}
-    await loadPurchasingData();render();toast('تم حفظ الفاتورة وبنودها وربط الوحدات المستلمة دون تكرار','success');return;
+    const savedBillId=billData?.id||(Array.isArray(billData)?billData[0]?.id:null);
+    const documentResult=selectedDocuments.length&&savedBillId?await uploadMotorcycleDocuments('supplier_bill',savedBillId,selectedDocuments):{uploaded:0,failed:selectedDocuments.length,reason:selectedDocuments.length?'تعذر تحديد رقم الفاتورة المحفوظة':''};
+    await loadPurchasingData();render();
+    if(documentResult.failed)toast(`تم حفظ الفاتورة وربط وحداتها؛ تعذر رفع ${documentResult.failed} مرفق. افتح «المرفقات» بجوار الفاتورة لإعادة المحاولة.`,'error');
+    else toast(selectedDocuments.length?`تم حفظ الفاتورة وربط وحداتها ورفع ${documentResult.uploaded} مرفق`:'تم حفظ الفاتورة وبنودها وربط الوحدات المستلمة دون تكرار','success');return;
+  }
+  if(form.id==='supplierBillDocumentsForm'){
+    if(!canManagePurchasing()||!supabase){toast('ليس لديك صلاحية إدارة مرفقات فواتير الموردين','error');return;}
+    const files=[...(new FormData(form).getAll('documents')||[])].filter(file=>file instanceof File&&file.size>0);
+    if(!files.length){toast('اختر ملفًا واحدًا على الأقل','error');return;}
+    const submit=form.querySelector('button[type="submit"]');if(submit)submit.disabled=true;
+    const result=await uploadMotorcycleDocuments('supplier_bill',form.dataset.billId,files);
+    if(result.uploaded){try{const bill=state.supplierBills.find(item=>item.id===form.dataset.billId);if(bill)openModal(supplierBillDocumentsFormHTML(bill,await loadMotorcycleDocuments('supplier_bill',bill.id)));}catch(error){closeModal();}}
+    if(result.failed)toast(`تم رفع ${result.uploaded} مستند؛ تعذر رفع ${result.failed}: ${result.reason||'خطأ غير محدد'}`,'error');
+    else toast(`تم رفع ${result.uploaded} مستند إلى فاتورة المورد`,'success');
+    if(submit&&result.failed)submit.disabled=false;return;
   }
   if(form.id==='supplierPaymentForm'){
-    if(!hasRole('admin')||!supabase){toast('ليس لديك صلاحية تسجيل مدفوعات الموردين','error');return;}
+    if(!canManagePurchasing()||!supabase){toast('ليس لديك صلاحية تسجيل مدفوعات الموردين','error');return;}
     const fd=new FormData(form),amount=Number(fd.get('amount'));
     if(!Number.isFinite(amount)||amount<=0){toast('أدخل قيمة دفعة صحيحة','error');return;}
     const submit=form.querySelector('button[type="submit"]');if(submit)submit.disabled=true;
@@ -3245,7 +3420,7 @@ document.addEventListener('submit', async (e) => {
   }
 
   if (form.id === 'supplierForm') {
-    if (!hasRole('admin') || !supabase) { toast('ليس لديك صلاحية إدارة الموردين', 'error'); return; }
+    if (!canManagePurchasing() || !supabase) { toast('ليس لديك صلاحية إدارة الموردين', 'error'); return; }
     const fd=new FormData(form);
     const payload={name:safeName(fd.get('name')),phone:safeName(fd.get('phone'))||null,email:safeName(fd.get('email')).toLowerCase()||null,address:safeName(fd.get('address'))||null,notes:safeName(fd.get('notes'))||null,created_by:state.user.id};
     const {error}=await supabase.from('suppliers').insert(payload);
@@ -3253,7 +3428,7 @@ document.addEventListener('submit', async (e) => {
     await loadPurchasingData();render();toast('تم حفظ المورد','success');return;
   }
   if (form.id === 'purchaseOrderForm') {
-    if (!hasRole('admin') || !supabase) { toast('ليس لديك صلاحية إنشاء أوامر التوريد', 'error'); return; }
+    if (!canManagePurchasing() || !supabase) { toast('ليس لديك صلاحية إنشاء أوامر التوريد', 'error'); return; }
     const fd=new FormData(form), rows=[...form.querySelectorAll('.purchase-order-row')], items=[], seen=new Set();
     for (const row of rows) {
       const motorcycleId=row.querySelector('[name="motorcycle_id"]')?.value;
@@ -3270,8 +3445,8 @@ document.addEventListener('submit', async (e) => {
     await loadPurchasingData();render();toast(`تم إنشاء أمر التوريد ${data.order_number} بعدد ${items.length} أصناف؛ لم يتغير المخزون بعد`,'success');return;
   }
   if (form.id === 'receivePurchaseForm') {
-    if (!hasRole('admin') || !supabase) { toast('ليس لديك صلاحية استلام التوريد', 'error'); return; }
-    const fd=new FormData(form), rows=[...form.querySelectorAll('[data-item-id]')], items=[];
+    if (!canManagePurchasing() || !supabase) { toast('ليس لديك صلاحية استلام التوريد', 'error'); return; }
+    const fd=new FormData(form), rows=[...form.querySelectorAll('[data-item-id]')], items=[], submittedVins=new Set(),submittedEngines=new Set();
     for (const row of rows) {
       const quantity=Number(row.querySelector('[name="quantity"]')?.value);
       if(!Number.isInteger(quantity)||quantity<0){toast('تحقق من كميات الاستلام؛ استخدم صفرًا للصنف غير المستلم','error');return;}
@@ -3283,10 +3458,19 @@ document.addEventListener('submit', async (e) => {
           const value=name=>unitRow.querySelector(`[name="${name}"]`)?.value;
           const vin=safeName(value('vin'));
           const odometer=Number(value('odometer_reading')||0);
+          const engine=safeName(value('engine_number'));
+          const normalizedVin=normalizeUnitIdentifier(vin),normalizedEngine=normalizeUnitIdentifier(engine);
           if(!vin||!Number.isInteger(odometer)||odometer<0){toast('أدخل رقم شاسيه صحيحًا وعداد كيلومترات غير سالب لكل وحدة','error');return;}
+          const duplicateVin=findDuplicateUnitIdentifier(state.motorcycleUnits,'vin',vin);
+          const duplicateEngine=engine?findDuplicateUnitIdentifier(state.motorcycleUnits,'engine_number',engine):null;
+          if(duplicateVin||submittedVins.has(normalizedVin)){toast('رقم الشاسيه مسجل مسبقًا أو مكرر داخل الاستلام؛ راجعه قبل الحفظ','error');unitRow.querySelector('[name="vin"]')?.focus();return;}
+          if(engine&&(duplicateEngine||submittedEngines.has(normalizedEngine))){toast('رقم الموتور مسجل مسبقًا أو مكرر داخل الاستلام؛ راجعه قبل الحفظ','error');unitRow.querySelector('[name="engine_number"]')?.focus();return;}
+          submittedVins.add(normalizedVin);if(normalizedEngine)submittedEngines.add(normalizedEngine);
           units.push({
-            vin,engine_number:safeName(value('engine_number'))||null,
-            barcode:safeName(value('barcode'))||null,
+            vin,engine_number:engine||null,
+            unit_year:value('unit_year')?Number(value('unit_year')):null,
+            unit_color:safeName(value('unit_color'))||null,
+            barcode:safeName(value('barcode'))||autoBarcodeFromVin(vin),
             odometer_reading:odometer,unit_condition:String(value('unit_condition')||'new'),
             warranty_start:value('warranty_start')||null,warranty_end:value('warranty_end')||null
           });
@@ -3744,8 +3928,18 @@ document.addEventListener('submit', async (e) => {
 
 });
 
+function updateReceiveUnitVisibility(form) {
+  if (!form) return;
+  for (const item of form.querySelectorAll('[data-item-id]')) {
+    const quantity=Math.max(0,Math.min(Number(item.querySelector('[name="quantity"]')?.value)||0,Number(item.querySelector('[name="quantity"]')?.max)||0));
+    [...item.querySelectorAll('[data-unit-row]')].forEach((unit,index)=>{unit.hidden=index>=quantity;});
+  }
+}
+
 /* ---------- Event: Input / Change ---------- */
 document.addEventListener('input', (e) => {
+  if (e.target?.id === 'showroomUnitSearch') filterShowroomUnitCards();
+  if (e.target?.matches('#receivePurchaseForm [name="quantity"]')) updateReceiveUnitVisibility(e.target.closest('form'));
   if(e.target.closest('#supplierBillForm')) updateSupplierBillTotal(e.target.closest('#supplierBillForm'));
   if (e.target.id === 'searchInput') {
     state.search = e.target.value;
@@ -3760,6 +3954,7 @@ document.addEventListener('input', (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  if (e.target?.id === 'showroomUnitStatus') filterShowroomUnitCards();
   if(e.target.id==='supplierBillPurchaseOrder') renderSupplierBillLines(e.target.value);
   if(e.target.closest('#supplierBillForm')) updateSupplierBillTotal(e.target.closest('#supplierBillForm'));
   if (e.target.id === 'filterCat') { state.filterCat = e.target.value; render(); }
@@ -3813,6 +4008,32 @@ async function loadMotorcycleUnits() {
     if(!data||data.length<500)break;
   }
   state.motorcycleUnits=allUnits;
+}
+
+async function loadShowroomSupplierRefs() {
+  state.unitSupplierRefs = {};
+  if (!supabase || !canManagePurchasing()) return;
+  const unitIds = (state.motorcycleUnits || []).map(unit => unit.id).filter(Boolean);
+  if (!unitIds.length) return;
+  const refs = {};
+  for (let offset=0; offset<unitIds.length; offset+=200) {
+    const batch=unitIds.slice(offset,offset+200);
+    const {data,error}=await supabase.from('supplier_bill_item_units')
+      .select('motorcycle_unit_id,supplier_bill_items!inner(supplier_bill_id,purchase_receipt_item_id,supplier_bills!inner(bill_number,suppliers!inner(name)),purchase_receipt_items(purchase_receipts(receipt_number)))')
+      .in('motorcycle_unit_id',batch);
+    if (error) {
+      console.warn('Showroom supplier invoice references unavailable',error);
+      return;
+    }
+    for (const row of data || []) {
+      const line=row.supplier_bill_items;
+      const bill=line?.supplier_bills;
+      const supplier=bill?.suppliers;
+      const receipt=line?.purchase_receipt_items?.purchase_receipts;
+      if (row.motorcycle_unit_id && bill) refs[row.motorcycle_unit_id]={supplier_name:supplier?.name||'',supplier_bill_number:bill.bill_number||'',receipt_number:receipt?.receipt_number||''};
+    }
+  }
+  state.unitSupplierRefs=refs;
 }
 
 async function loadMotorcycles() {
@@ -4186,7 +4407,7 @@ function updateSupplierBillTotal(form) {
 }
 
 async function loadPurchasingData() {
-  if (!state.user || state.user.role !== 'admin') {
+  if (!canManagePurchasing()) {
     state.purchasingLoadStatus = 'forbidden';
     state.purchasingLoadErrors = [];
     state.suppliers=[]; state.purchaseOrders=[]; state.supplierBills=[]; state.supplierBillItems=[]; state.supplierPayments=[]; state.supplierReturns=[]; state.supplierReturnItems=[];
