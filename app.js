@@ -1,6 +1,6 @@
 import { supabase, supabaseConfigured, getCurrentProfile } from './src/supabase.js';
 import { esc, safeImageUrl } from './src/security.js';
-import { findDuplicateUnitIdentifier, matchesShowroomUnit, normalizeShowroomSearch, normalizeUnitIdentifier } from './src/showroom-units.js';
+import { findDuplicateUnitIdentifier, matchesShowroomUnit, normalizeShowroomSearch, normalizeUnitIdentifier, validateShowroomUnitIntake } from './src/showroom-units.js';
 import { canDeleteMotorcycleDocument, cleanMotorcycleDocumentName, motorcycleDocumentPath, validateMotorcycleDocument } from './src/showroom-documents.js';
 import { applyQueryResults } from './src/purchasing-results.js';
 import { fmtMarketPrice, sparklineSvg, changeHtml, filterMarketRows } from './src/market-analysis.js';
@@ -3469,7 +3469,11 @@ document.addEventListener('submit', async (e) => {
           const odometer=Number(value('odometer_reading')||0);
           const engine=safeName(value('engine_number'));
           const normalizedVin=normalizeUnitIdentifier(vin),normalizedEngine=normalizeUnitIdentifier(engine);
+          const intakeIssue=validateShowroomUnitIntake({unit_year:value('unit_year'),unit_color:value('unit_color'),warranty_start:value('warranty_start'),warranty_end:value('warranty_end')});
           if(!vin||!Number.isInteger(odometer)||odometer<0){toast('أدخل رقم شاسيه صحيحًا وعداد كيلومترات غير سالب لكل وحدة','error');return;}
+          if(intakeIssue==='year'){toast('سنة الصنع يجب أن تكون بين 1900 و2200','error');unitRow.querySelector('[name="unit_year"]')?.focus();return;}
+          if(intakeIssue==='color'){toast('لون الوحدة يجب ألا يتجاوز 60 حرفًا','error');unitRow.querySelector('[name="unit_color"]')?.focus();return;}
+          if(intakeIssue==='warranty'){toast('تاريخ نهاية الضمان يجب أن يكون بعد بدايته','error');unitRow.querySelector('[name="warranty_end"]')?.focus();return;}
           const duplicateVin=findDuplicateUnitIdentifier(state.motorcycleUnits,'vin',vin);
           const duplicateEngine=engine?findDuplicateUnitIdentifier(state.motorcycleUnits,'engine_number',engine):null;
           if(duplicateVin||submittedVins.has(normalizedVin)){toast('رقم الشاسيه مسجل مسبقًا أو مكرر داخل الاستلام؛ راجعه قبل الحفظ','error');unitRow.querySelector('[name="vin"]')?.focus();return;}

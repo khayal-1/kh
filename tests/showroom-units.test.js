@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findDuplicateUnitIdentifier, matchesShowroomUnit, normalizeUnitIdentifier } from '../src/showroom-units.js';
+import { findDuplicateUnitIdentifier, matchesShowroomUnit, normalizeUnitIdentifier, validateShowroomUnitIntake } from '../src/showroom-units.js';
 
 const units = [
   { id: 'u1', vin: 'ABC-123', engine_number: 'ENG 55', barcode: 'UNIT-001', unit_year: 2025, unit_color: 'أحمر', supplier_name: 'مؤسسة النور', supplier_bill_number: 'INV-77', unit_status: 'available', motorcycles: { name: 'هوندا CB', model_year: 2025 } },
@@ -55,4 +55,16 @@ test('showroom filters combine model, sale-price range, and inclusive receipt-da
 test('date filters exclude units with no recorded receipt date rather than guessing from registration', () => {
   assert.equal(matchesShowroomUnit(units[0], '', 'all', { receivedFrom: '2026-01-01' }), false);
   assert.equal(matchesShowroomUnit(units[0], '', 'all', { receivedTo: '2026-12-31' }), false);
+});
+
+
+test('receiving validation rejects invalid year, long color, and reversed warranty dates', () => {
+  assert.equal(validateShowroomUnitIntake({ unit_year: '1899' }), 'year');
+  assert.equal(validateShowroomUnitIntake({ unit_year: '2201' }), 'year');
+  assert.equal(validateShowroomUnitIntake({ unit_year: '2026' }), null);
+  assert.equal(validateShowroomUnitIntake({ unit_year: '' }), null);
+  assert.equal(validateShowroomUnitIntake({ unit_color: 'أ'.repeat(61) }), 'color');
+  assert.equal(validateShowroomUnitIntake({ unit_color: 'أ'.repeat(60) }), null);
+  assert.equal(validateShowroomUnitIntake({ warranty_start: '2026-06-01', warranty_end: '2026-05-31' }), 'warranty');
+  assert.equal(validateShowroomUnitIntake({ warranty_start: '2026-06-01', warranty_end: '2026-06-01' }), null);
 });

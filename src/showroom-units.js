@@ -37,6 +37,16 @@ export function matchesShowroomUnit(unit, query, status = 'all', filters = {}) {
   return haystack.includes(needle);
 }
 
+export function validateShowroomUnitIntake(values = {}) {
+  const year = values.unit_year == null || values.unit_year === '' ? null : Number(values.unit_year);
+  if (year !== null && (!Number.isInteger(year) || year < 1900 || year > 2200)) return 'year';
+  if (String(values.unit_color || '').trim().length > 60) return 'color';
+  const start = String(values.warranty_start || '');
+  const end = String(values.warranty_end || '');
+  if (start && end && end < start) return 'warranty';
+  return null;
+}
+
 export function findDuplicateUnitIdentifier(units, field, value, exceptId = null) {
   const normalized = normalizeUnitIdentifier(value);
   if (!normalized) return null;
