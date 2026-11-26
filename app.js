@@ -1,6 +1,7 @@
 import { supabase, supabaseConfigured, getCurrentProfile } from './src/supabase.js';
 import { esc, safeImageUrl } from './src/security.js';
 import { applyQueryResults } from './src/purchasing-results.js';
+import { fmtMarketPrice, sparklineSvg, changeHtml, filterMarketRows } from './src/market-analysis.js';
 
 /* =========================================================
    El Khayal Motors — app.js (Full SPA)
@@ -319,6 +320,7 @@ function sidebarItems() {
     items.push({ section: 'الأسعار والكتالوج' });
     if (isAdminLike || hasAnyPermission('catalog_view', 'catalog_manage')) {
       items.push({ route: 'inventory', label: 'الأسعار', icon: 'fa-tags' });
+      items.push({ route: 'market-analysis', label: 'تحليل السوق', icon: 'fa-chart-line' });
     }
     if (isAdminLike || hasPermission('sales_manage')) {
       items.push({ route: 'sales-tools', label: 'عروض التقسيط والأسعار', icon: 'fa-file-invoice-dollar' });
@@ -1351,6 +1353,100 @@ function pageTarget() {
 }
 
 
+
+/* ---------- Market Analysis (PriceBuddy) ---------- */
+state.marketAnalysis = state.marketAnalysis || { rows: [], filter: 'all', q: '', selId: null, err: null, stale: false, at: null, loading: false, newUrl: '' };
+
+async function loadMarketAnalysis(force) {
+  const m = state.marketAnalysis;
+  if (!supabase) {
+    m.err = 'الاتصال بقاعدة البيانات غير متاح';
+    return;
+  }
+  m.loading = true;
+  try {
+    const { data, error } = await supabase.functions.invoke('market-prices', {
+      body: { action: 'list', refresh: !!force }
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    m.rows = Array.isArray(data?.rows) ? data.rows : [];
+    m.stale = !!data?.stale;
+    m.at = data?.at || null;
+    m.err = null;
+  } catch (e) {
+    m.err = e?.message || 'تعذر تحديث الأسعار، حاول لاحقاً';
+  } finally {
+    m.loading = false;
+  }
+}
+
+function pageMarketAnalysis() {
+  const u = currentUser();
+  if (!u || !['staff', 'admin', 'manager', 'owner'].includes(u.role)) return pageLogin();
+  if (u.role === 'staff' && !hasAnyPermission('catalog_view', 'catalog_manage')) return pageNoPermission();
+
+  const m = state.marketAnalysis || { rows: [], filter: 'all', q: '', selId: null, err: null, stale: false, at: null, loading: false, newUrl: '' };
+  const shown = filterMarketRows(m.rows, m.q, m.filter);
+  const sel = m.selId != null ? (m.rows.find((r) => r.id === m.selId) || null) : null;
+
+  const filterBtns = [
+    ['all', 'الكل'],
+    ['جديد', 'جديد فقط'],
+    ['مستعمل', 'مستعمل فقط']
+  ].map(([k, l]) =>
+    `<button type="button" class="mk-toggle-btn" data-mk-filter="${esc(k)}" aria-pressed="${m.filter === k ? 'true' : 'false'}">${esc(l)}</button>`
+  ).join('');
+
+  const rowsHtml = shown.length
+    ? shown.map((r) => `
+      <tr data-mk-row="${esc(r.id)}" tabindex="0">
+        <td>${esc(r.title)}</td>
+        <td>${esc(r.category)}</td>
+        <td>${fmtMarketPrice(r.current)}</td>
+        <td>${changeHtml(r.change)}</td>
+        <td>${sparklineSvg((r.history || []).slice(-7))}</td>
+        <td>${fmtMarketPrice(r.best)}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="6" class="mk-muted">لا توجد موديلات مطابقة. أضف موديلاً في PriceBuddy ليظهر هنا.</td></tr>`;
+
+  const panel = sel ? `
+    <aside class="mk-panel" role="dialog" aria-label="${esc(sel.title)}">
+      <button type="button" class="mk-close" data-mk-close>إغلاق</button>
+      <h2>${esc(sel.title)}</h2>
+      <div class="mk-spark-lg">${sparklineSvg(sel.history || [], 320, 90)}</div>
+      <h3>الروابط المراقبة</h3>
+      <ul class="mk-url-list">${(sel.urls || []).map((u) =>
+        `<li><a href="${esc(u.url)}" target="_blank" rel="noreferrer">${esc(u.store || u.url)}</a></li>`
+      ).join('') || '<li class="mk-muted">لا روابط بعد</li>'}</ul>
+      <div class="mk-add">
+        <input type="url" id="mkNewUrl" placeholder="رابط إعلان جديد" value="${esc(m.newUrl || '')}" />
+        <button type="button" class="btn btn-primary btn-sm" data-mk-add-url data-product-id="${esc(sel.id)}">إضافة للمراقبة</button>
+      </div>
+    </aside>` : '';
+
+  return `
+  <div class="mk panel" dir="rtl">
+    <header class="mk-head">
+      <h1 class="page-title">تحليل السوق</h1>
+      <input class="mk-search input" id="mkSearch" type="search" placeholder="ابحث عن موديل…" value="${esc(m.q || '')}" />
+      <div class="mk-toggle" role="group" aria-label="الفئة">${filterBtns}</div>
+      <button type="button" class="mk-refresh btn btn-ghost" data-mk-refresh ${m.loading ? 'disabled' : ''}>${m.loading ? 'جارٍ التحديث…' : 'تحديث الآن'}</button>
+    </header>
+    ${m.err ? `<p class="mk-warn" role="alert">${esc(m.err)}</p>` : ''}
+    ${m.stale && !m.err ? `<p class="mk-warn">البيانات المعروضة من آخر تحديث ناجح.</p>` : ''}
+    ${m.at ? `<p class="mk-muted">آخر تحديث: ${esc(new Date(m.at).toLocaleString('ar-EG'))}</p>` : ''}
+    <div class="mk-scroll table-wrap">
+      <table class="mk-table data-table">
+        <thead><tr><th>الموديل</th><th>الفئة</th><th>سعر السوق اليوم</th><th>التغير</th><th>اتجاه 7 أيام</th><th>أفضل سعر</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+    ${panel}
+  </div>`;
+}
+
+
 function getMarketPrices() {
   try { return JSON.parse(localStorage.getItem('kh_market_prices') || '{}') || {}; } catch { return {}; }
 }
@@ -1816,6 +1912,7 @@ const ROUTES = {
   'inventory-tools': pageInventoryTools,
   'customer-relations': pageCustomerRelations,
   'sales-tools': pageSalesTools,
+  'market-analysis': pageMarketAnalysis,
   'owner-data': pageOwnerData
 };
 
@@ -1856,6 +1953,7 @@ function navigate(route) {
   render();
   if (route === 'dashboard' && state.user?.role === 'admin') Promise.all([loadSalesData(),loadPurchasingData(),loadFinanceData()]).then(render);
   if (route === 'manage-bikes' && state.user) Promise.all([loadMotorcycles(),loadMotorcycleUnits()]).then(render);
+  if (route === 'market-analysis' && state.user) loadMarketAnalysis(false).then(render);
   if (route === 'inventory' && state.user) Promise.all([loadMotorcycles(),loadInventoryData()]).then(render);
   if (route === 'staff' && state.user?.role === 'admin') loadStaffDirectory().then(render);
   if (route === 'pos') Promise.all([loadSalesData(),loadMotorcycles(),loadMotorcycleUnits(),loadSalesCashAccounts()]).then(render);
@@ -4328,3 +4426,98 @@ $('#languageToggle')?.addEventListener('click', () => {
 });
 
 init();
+
+
+/* Market analysis interactions */
+document.addEventListener('click', async (e) => {
+  if (!state.route || state.route !== 'market-analysis') return;
+  const m = state.marketAnalysis;
+  if (!m) return;
+
+  const refreshBtn = e.target.closest('[data-mk-refresh]');
+  if (refreshBtn) {
+    e.preventDefault();
+    await loadMarketAnalysis(true);
+    render();
+    return;
+  }
+
+  const filterBtn = e.target.closest('[data-mk-filter]');
+  if (filterBtn) {
+    e.preventDefault();
+    m.filter = filterBtn.getAttribute('data-mk-filter') || 'all';
+    render();
+    return;
+  }
+
+  const row = e.target.closest('[data-mk-row]');
+  if (row) {
+    e.preventDefault();
+    m.selId = Number(row.getAttribute('data-mk-row'));
+    m.newUrl = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-mk-close]')) {
+    e.preventDefault();
+    m.selId = null;
+    render();
+    return;
+  }
+
+  const addBtn = e.target.closest('[data-mk-add-url]');
+  if (addBtn) {
+    e.preventDefault();
+    const productId = Number(addBtn.getAttribute('data-product-id'));
+    const input = document.getElementById('mkNewUrl');
+    const url = (input?.value || '').trim();
+    if (!url) { toast('أدخل رابط الإعلان', 'error'); return; }
+    if (!supabase) { toast('الاتصال غير متاح', 'error'); return; }
+    addBtn.disabled = true;
+    try {
+      const { data, error } = await supabase.functions.invoke('market-prices', {
+        body: { action: 'add_url', product_id: productId, url }
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast('تمت إضافة الرابط', 'success');
+      m.newUrl = '';
+      await loadMarketAnalysis(true);
+      render();
+    } catch (err) {
+      toast(err?.message || 'تعذرت إضافة الرابط', 'error');
+    } finally {
+      addBtn.disabled = false;
+    }
+  }
+});
+
+document.addEventListener('input', (e) => {
+  if (state.route !== 'market-analysis') return;
+  if (e.target?.id === 'mkSearch') {
+    state.marketAnalysis.q = e.target.value || '';
+    // light re-render of table only would be ideal; full render is fine for staff tool
+    const tbody = document.querySelector('.mk-table tbody');
+    if (!tbody) return;
+    const m = state.marketAnalysis;
+    const shown = filterMarketRows(m.rows, m.q, m.filter);
+    tbody.innerHTML = shown.length
+      ? shown.map((r) => `<tr data-mk-row="${esc(r.id)}" tabindex="0"><td>${esc(r.title)}</td><td>${esc(r.category)}</td><td>${fmtMarketPrice(r.current)}</td><td>${changeHtml(r.change)}</td><td>${sparklineSvg((r.history || []).slice(-7))}</td><td>${fmtMarketPrice(r.best)}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="mk-muted">لا توجد موديلات مطابقة. أضف موديلاً في PriceBuddy ليظهر هنا.</td></tr>';
+  }
+  if (e.target?.id === 'mkNewUrl') {
+    state.marketAnalysis.newUrl = e.target.value || '';
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (state.route !== 'market-analysis') return;
+  const row = e.target.closest?.('[data-mk-row]');
+  if (row && e.key === 'Enter') {
+    state.marketAnalysis.selId = Number(row.getAttribute('data-mk-row'));
+    state.marketAnalysis.newUrl = '';
+    render();
+  }
+});
+
